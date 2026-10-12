@@ -1,0 +1,18 @@
+{
+  "rights": [
+    {"code": "vm.view", "description": "Voir l'état des VMs"},
+    {"code": "vm.console", "description": "Accéder à la console graphique"},
+    {"code": "vm.power", "description": "Démarrer, arrêter, redémarrer une VM"},
+    {"code": "vm.request_create", "description": "Demander la création d'une VM"},
+    {"code": "vm.request_update", "description": "Demander la modification d'une VM"},
+    {"code": "vm.network", "description": "Mettre des VMs en réseau"},
+    {"code": "vm.delete", "description": "Supprimer une VM"},
+    {"code": "vm.share", "description": "Partager une VM avec un autre projet"},
+    {"code": "storage.view", "description": "Voir les stockages"},
+    {"code": "storage.request_create", "description": "Demander la création d'un stockage"},
+    {"code": "storage.request_update", "description": "Demander la modification d'un stockage"},
+    {"code": "storage.delete", "description": "Supprimer un stockage"},
+    {"code": "storage.share", "description": "Partager un stockage avec un autre projet"},
+    {"code": "project.invite", "description": "Inviter des utilisateurs dans le projet"}
+  ]
+}

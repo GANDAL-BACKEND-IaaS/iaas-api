@@ -1,0 +1,9 @@
+[
+  {"name": "Lecteur", "description": "Consultation seule",
+   "rights": ["vm.view", "storage.view"]},
+  {"name": "Opérateur", "description": "Lecteur + console et alimentation",
+   "rights": ["vm.view", "storage.view", "vm.console", "vm.power"]},
+  {"name": "Gestionnaire", "description": "Opérateur + modifications et réseau",
+   "rights": ["vm.view", "storage.view", "vm.console", "vm.power",
+              "vm.request_update", "vm.network", "storage.request_update"]}
+]

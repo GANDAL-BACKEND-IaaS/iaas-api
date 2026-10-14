@@ -1,17 +1,21 @@
-.env
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
 
-# Local environment and secrets
+# Environnements virtuels
+.venv/
+venv/
+env/
+
+# Secrets et config locale
+.env
 .env.*
 !.env.example
 
-# Python environments and bytecode
-.venv/
-venv/
-__pycache__/
-*.py[cod]
-*$py.class
-
-# Test and tooling caches
+# Caches outils
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
@@ -19,18 +23,17 @@ __pycache__/
 .coverage.*
 htmlcov/
 
-# Local databases
+# Bases locales
 *.db
 *.db-*
 *.sqlite
 *.sqlite3
-*.sqlite-*
 
-# Build and packaging output
-build/
-dist/
-*.egg-info/
+# Docker local
+docker-compose.override.yml
 
-# Editor and operating system files
+# Editeurs et OS
+.idea/
+.vscode/
 .DS_Store
 Thumbs.db

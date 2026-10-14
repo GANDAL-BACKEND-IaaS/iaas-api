@@ -1,0 +1,53 @@
+# Regles du backend IaaS
+
+La specification de reference est docs/conception-iaas-api.pdf. Elle prime sur toute convention locale.
+
+## Langue et forme
+
+- Repondre en francais.
+- Commenter chaque fichier, chaque classe et chaque fonction : le commentaire dit le role exact, pas une paraphrase du code.
+- Ne jamais utiliser le tiret cadratin. Utiliser le tiret simple (-).
+
+## Architecture
+
+- VSA / hexagonale : la logique metier ne connait que des ports. Les adaptateurs vivent dans app/infrastructure.
+- Tant que l'integration n'est pas faite, toute dependance externe passe par un mock.
+- Ne pas appeler un groupe externe (hyperviseur, reseau, stockage, DNS, notifications) autrement que via son port.
+- Le backend ne gere pas les comptes, l'hyperviseur, le DNS ni le PaaS. Il orchestre.
+
+## Dossiers par developpeur
+
+Ne modifier que son perimetre, pour eviter les conflits sur develop.
+
+- ZUCHUON (IAM) : app/application/ports/iam.py, app/infrastructure/iam/, app/features/auth/, app/features/profiles/, app/features/projects/, app/shared/models/projects.py
+- NAOMI (VM) : app/features/vms/, app/features/packs/, app/application/ports/hypervisor.py, app/application/ports/dns.py, app/infrastructure/hypervisor/, app/infrastructure/dns/, app/shared/models/vms.py, app/shared/models/packs.py
+- KOM (Reseau) : app/features/networks/, app/application/ports/network.py, app/infrastructure/network/, app/shared/models/networks.py
+- TABA (Espaces) : app/features/storages/, app/application/ports/storage.py, app/infrastructure/storage/, app/shared/models/storages.py
+
+Le socle partage (app/core, app/api, app/features/requests, app/features/shares, app/shared/policies, notifications) ne change qu'avec l'accord de l'equipe.
+
+## API
+
+- Toutes les routes sont sous /api/v1.
+- Chaque route a un schema entrant type et un response_model (sauf 204).
+- Chaque route documente ses erreurs avec error_responses(...) et un operation_id stable.
+- Les listes renvoient Page (items, total, page, page_size).
+- Les erreurs ont la forme {"error": {"code", "message", "details"?}} et un code du catalogue ErrorCode.
+- Une action qui depend d'un port indisponible est refusee (503, upstream_unavailable) et n'est jamais appliquee a moitie.
+- Les suppressions exigent une confirmation explicite.
+
+## Tests et outillage
+
+- Un fichier de test par fonction publique, avec le cas nominal et les cas limites.
+- tests/ miroir de app/.
+- pytest et ruff check . doivent passer.
+- Le projet se lance avec une seule commande : docker compose up --build.
+- Le schema de base passe par Alembic. Ne pas reintroduire create_all dans le lifespan.
+
+## Metier a respecter
+
+- Figure 3 pour chaque action sur une ressource : membre, ressource visible, droit requis. Le proprietaire a tous les droits.
+- Une ressource partagee utilise les droits du projet destinataire. Le partage ne transmet aucun droit.
+- Seules creation et modification passent par une demande traitee par un administrateur, sans modifier le contenu demande.
+- La suppression est directe, revoque les partages, et pour une VM appelle le DNS puis la sort des reseaux.
+- Un pack utilise par une demande de creation en attente ne se supprime pas. S'il est modifie, ces demandes sont mises a jour et restent a valider.

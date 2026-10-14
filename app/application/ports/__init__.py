@@ -1,0 +1,1 @@
+"""Interfaces des dependances externes."""

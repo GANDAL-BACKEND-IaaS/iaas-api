@@ -1,3 +1,5 @@
+"""Session SQLAlchemy. SQLite en test, PostgreSQL dans le conteneur."""
+
 from collections.abc import Iterator
 
 from sqlalchemy import create_engine
@@ -11,5 +13,6 @@ SessionLocal = sessionmaker(engine, expire_on_commit=False)
 
 
 def get_db() -> Iterator[Session]:
+    """Fournit une session et la ferme a la fin de la requete."""
     with SessionLocal() as session:
         yield session

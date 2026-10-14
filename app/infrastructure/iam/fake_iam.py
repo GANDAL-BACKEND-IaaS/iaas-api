@@ -12,6 +12,7 @@ from app.application.ports.iam import (
     IamPort,
     Identity,
     InvalidCredentials,
+    MemberGrant,
     NotAMember,
     OwnerRightsImmutable,
     ProjectAlreadyExists,
@@ -128,6 +129,15 @@ class FakeIamClient(IamPort):
     async def list_projects(self, user_id: str) -> frozenset[str]:
         self._get_user(user_id)
         return frozenset(pid for pid, p in self._projects.items() if self._is_member(p, user_id))
+
+    async def list_members(self, project_id: str) -> tuple[MemberGrant, ...]:
+        """Membres du projet. Le proprietaire recoit l'ensemble des droits connus."""
+        project = self._get_project(project_id)
+        owner = MemberGrant(project.owner_id, True, self._known_rights)
+        guests = tuple(
+            MemberGrant(user_id, False, rights) for user_id, rights in project.grants.items()
+        )
+        return (owner, *guests)
 
     # ---- privé ----
     def _issue_token(self, identity: Identity) -> AuthToken:

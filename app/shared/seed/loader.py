@@ -19,6 +19,17 @@ class ProfileDef:
 
 
 @dataclass(frozen=True)
+class PackDef:
+    """Pack de reference : caracteristiques de base d'une VM."""
+
+    name: str
+    ram: int
+    cpu: int
+    vram: int
+    ssd: int
+
+
+@dataclass(frozen=True)
 class RightsCatalog:
     rights: tuple[RightDef, ...]
 
@@ -33,5 +44,12 @@ def load_rights_catalog(path: Path = SEED_DIR / "rights_catalog.json") -> Rights
 
 
 def load_default_profiles(path: Path = SEED_DIR / "default_profiles.json") -> tuple[ProfileDef, ...]:
+    """Charge les profils de droits livres avec l'application."""
     data = json.loads(path.read_text(encoding="utf-8"))
     return tuple(ProfileDef(p["name"], p.get("description", ""), tuple(p["rights"])) for p in data)
+
+
+def load_default_packs(path: Path = SEED_DIR / "default_packs.json") -> tuple[PackDef, ...]:
+    """Charge les packs de VM livres avec l'application."""
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return tuple(PackDef(p["name"], p["ram"], p["cpu"], p["vram"], p["ssd"]) for p in data)

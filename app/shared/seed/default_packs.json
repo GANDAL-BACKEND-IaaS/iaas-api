@@ -1,0 +1,4 @@
+[
+  {"name": "Standard", "ram": 2048, "cpu": 2, "vram": 128, "ssd": 40},
+  {"name": "Premium", "ram": 8192, "cpu": 4, "vram": 512, "ssd": 160}
+]

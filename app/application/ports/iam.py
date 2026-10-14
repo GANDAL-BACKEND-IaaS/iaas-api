@@ -36,6 +36,15 @@ class AuthToken:
     token_type: str = "bearer"
 
 
+@dataclass(frozen=True)
+class MemberGrant:
+    """Membre d'un projet tel que le port IAM le connait."""
+
+    user_id: str
+    is_owner: bool
+    rights: frozenset[Right]
+
+
 class IamError(Exception): ...
 class InvalidCredentials(IamError): ...
 class InvalidToken(IamError): ...
@@ -88,3 +97,7 @@ class IamPort(ABC):
     @abstractmethod
     async def list_projects(self, user_id: str) -> frozenset[str]:
         """Identifiants des projets auxquels l'utilisateur a accès."""
+
+    @abstractmethod
+    async def list_members(self, project_id: str) -> tuple[MemberGrant, ...]:
+        """Membres du projet, proprietaire inclus, avec leurs droits."""

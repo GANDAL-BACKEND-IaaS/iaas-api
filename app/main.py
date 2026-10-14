@@ -1,25 +1,48 @@
+"""Point d'entree FastAPI du backend IaaS.
+
+Le schema est gere par Alembic. Au demarrage, on insere seulement les donnees de reference.
+"""
+
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.core.database import SessionLocal, engine
-from app.features.auth.router import router as auth_router
-from app.features.profiles.router import router as profiles_router
-from app.shared.models import identities, rights  # noqa: F401  (enregistre les tables)
-from app.shared.models.base import Base
-from app.shared.seed.seeder import seed_default_profiles, seed_rights
+from app.api.v1.router import router as v1_router
+from app.core.database import SessionLocal
+from app.core.errors import register_exception_handlers
+from app.shared.models import (  # noqa: F401
+    audit,
+    identities,
+    networks,
+    packs,
+    projects,
+    requests,
+    rights,
+    shares,
+    storages,
+    vms,
+)
+from app.shared.seed.seeder import seed_default_packs, seed_default_profiles, seed_rights
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    Base.metadata.create_all(engine)  # provisoire, remplacé par Alembic ensuite
+    """Insere le catalogue de reference si les tables existent deja (apres migration)."""
     with SessionLocal() as db:
         seed_rights(db)
         seed_default_profiles(db)
+        seed_default_packs(db)
     yield
 
 
-app = FastAPI(title="IaaS API", lifespan=lifespan)
-
-app.include_router(profiles_router)
-app.include_router(auth_router)
+app = FastAPI(
+    title="IaaS API",
+    version="1.0.0",
+    summary="Backend metier d'une plateforme IaaS.",
+    docs_url="/api/v1/docs",
+    redoc_url="/api/v1/redoc",
+    openapi_url="/api/v1/openapi.json",
+    lifespan=lifespan,
+)
+register_exception_handlers(app)
+app.include_router(v1_router)

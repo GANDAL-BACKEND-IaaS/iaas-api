@@ -10,7 +10,7 @@ from app.core.dependencies import get_iam
 from app.core.settings import get_settings
 from app.infrastructure.iam.fake_iam import FakeIamClient
 from app.main import app
-from app.shared.models import identities, rights  # noqa: F401
+from app.shared import models as _models  # noqa: F401  enregistre toutes les tables
 from app.shared.models.base import Base
 from app.shared.seed.loader import load_rights_catalog
 from app.shared.seed.seeder import seed_default_profiles, seed_rights

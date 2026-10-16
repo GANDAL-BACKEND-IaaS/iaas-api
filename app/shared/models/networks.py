@@ -6,7 +6,7 @@ Un reseau est defini dans un projet et ne relie que des VMs visibles dans ce pro
 from datetime import datetime
 
 from sqlalchemy import DateTime, ForeignKey, String, UniqueConstraint
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.shared.models.base import Base
 from app.shared.time import utcnow
@@ -21,6 +21,14 @@ class Network(Base):
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
     name: Mapped[str] = mapped_column(String(128))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    members: Mapped[list["NetworkVm"]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin"
+    )
+
+    @property
+    def vm_ids(self) -> list[str]:
+        return [m.vm_id for m in self.members]
 
 
 class NetworkVm(Base):

@@ -13,6 +13,14 @@ class NetworkCreateIn(BaseModel):
     name: str = Field(min_length=1, max_length=128)
 
 
+class NetworkUpdateIn(BaseModel):
+    """Modification d'un reseau (renommage)."""
+
+    model_config = ConfigDict(json_schema_extra={"examples": [{"name": "nouveau-nom-lan"}]})
+
+    name: str = Field(min_length=1, max_length=128)
+
+
 class NetworkMembershipIn(BaseModel):
     """VM a rattacher. Elle doit etre visible dans le projet du reseau (R21)."""
 

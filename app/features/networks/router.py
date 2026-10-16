@@ -3,13 +3,21 @@
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 
-from app.application.ports.iam import Identity
+from app.application.ports.iam import IamPort, Identity
+from app.application.ports.network import NetworkPort
 from app.core.database import get_db
+from app.core.dependencies import get_iam
+from app.core.dependencies import get_network as get_network_port
 from app.core.errors import ErrorCode, error_responses
 from app.core.pagination import Page, PageParams, get_page_params
 from app.features.auth.dependencies import get_current_identity
 from app.features.networks import service
-from app.features.networks.schemas import NetworkCreateIn, NetworkMembershipIn, NetworkOut
+from app.features.networks.schemas import (
+    NetworkCreateIn,
+    NetworkMembershipIn,
+    NetworkOut,
+    NetworkUpdateIn,
+)
 
 router = APIRouter(prefix="/projects/{project_id}/networks", tags=["reseaux"])
 
@@ -30,16 +38,26 @@ _COMMON = (
     status_code=status.HTTP_201_CREATED,
     operation_id="create_network",
     summary="Creer un reseau",
-    responses=error_responses(*_COMMON),
+    responses=error_responses(*_COMMON, ErrorCode.CONFLICT),
 )
-def create_network(
+async def create_network(
     project_id: str,
     body: NetworkCreateIn,
     identity: Identity = Depends(get_current_identity),
+    iam: IamPort = Depends(get_iam),
+    network: NetworkPort = Depends(get_network_port),
     db: Session = Depends(get_db),
 ) -> NetworkOut:
     """F7 : cree un reseau dans le projet."""
-    return service.create_network(db, identity, project_id, body.name)
+    row = await service.create_network(
+        db,
+        iam,
+        network,
+        actor_id=identity.user_id,
+        project_id=project_id,
+        name=body.name,
+    )
+    return NetworkOut.model_validate(row)
 
 
 @router.get(
@@ -49,14 +67,79 @@ def create_network(
     summary="Lister les reseaux",
     responses=error_responses(*_COMMON),
 )
-def list_networks(
+async def list_networks(
     project_id: str,
     identity: Identity = Depends(get_current_identity),
+    iam: IamPort = Depends(get_iam),
     db: Session = Depends(get_db),
     params: PageParams = Depends(get_page_params),
 ) -> Page[NetworkOut]:
     """F7 : liste paginee des reseaux du projet."""
-    return service.list_networks(db, identity, project_id, params)
+    rows, total = await service.list_networks(
+        db,
+        iam,
+        actor_id=identity.user_id,
+        project_id=project_id,
+        params=params,
+    )
+    return Page[NetworkOut](
+        items=[NetworkOut.model_validate(row) for row in rows],
+        total=total,
+        page=params.page,
+        page_size=params.page_size,
+    )
+
+
+@router.get(
+    "/{network_id}",
+    response_model=NetworkOut,
+    operation_id="get_network",
+    summary="Consulter un reseau",
+    responses=error_responses(*_COMMON),
+)
+async def get_network(
+    project_id: str,
+    network_id: str,
+    identity: Identity = Depends(get_current_identity),
+    iam: IamPort = Depends(get_iam),
+    db: Session = Depends(get_db),
+) -> NetworkOut:
+    """Consulte un reseau au sein d'un projet."""
+    row = await service.get_network(
+        db,
+        iam,
+        actor_id=identity.user_id,
+        project_id=project_id,
+        network_id=network_id,
+    )
+    return NetworkOut.model_validate(row)
+
+
+@router.patch(
+    "/{network_id}",
+    response_model=NetworkOut,
+    operation_id="update_network",
+    summary="Renommer un reseau",
+    responses=error_responses(*_COMMON, ErrorCode.CONFLICT),
+)
+async def update_network(
+    project_id: str,
+    network_id: str,
+    body: NetworkUpdateIn,
+    identity: Identity = Depends(get_current_identity),
+    iam: IamPort = Depends(get_iam),
+    db: Session = Depends(get_db),
+) -> NetworkOut:
+    """Renomme un reseau au sein d'un projet."""
+    row = await service.rename_network(
+        db,
+        iam,
+        actor_id=identity.user_id,
+        project_id=project_id,
+        network_id=network_id,
+        new_name=body.name,
+    )
+    return NetworkOut.model_validate(row)
 
 
 @router.post(
@@ -64,17 +147,28 @@ def list_networks(
     response_model=NetworkOut,
     operation_id="attach_vm_to_network",
     summary="Rattacher une VM",
-    responses=error_responses(*_COMMON, ErrorCode.CONFLICT),
+    responses=error_responses(*_COMMON, ErrorCode.CONFLICT, ErrorCode.BAD_REQUEST),
 )
-def attach_vm(
+async def attach_vm(
     project_id: str,
     network_id: str,
     body: NetworkMembershipIn,
     identity: Identity = Depends(get_current_identity),
+    iam: IamPort = Depends(get_iam),
+    network: NetworkPort = Depends(get_network_port),
     db: Session = Depends(get_db),
 ) -> NetworkOut:
     """F7 : rattache une VM visible dans le projet, partagee ou non (R21)."""
-    return service.attach_vm(db, identity, project_id, network_id, body.vm_id)
+    row = await service.attach_vm(
+        db,
+        iam,
+        network,
+        actor_id=identity.user_id,
+        project_id=project_id,
+        network_id=network_id,
+        vm_id=body.vm_id,
+    )
+    return NetworkOut.model_validate(row)
 
 
 @router.delete(
@@ -84,15 +178,26 @@ def attach_vm(
     summary="Retirer une VM du reseau",
     responses=error_responses(*_COMMON),
 )
-def detach_vm(
+async def detach_vm(
     project_id: str,
     network_id: str,
     vm_id: str,
     identity: Identity = Depends(get_current_identity),
+    iam: IamPort = Depends(get_iam),
+    network: NetworkPort = Depends(get_network_port),
     db: Session = Depends(get_db),
 ) -> NetworkOut:
     """F7 : retire une VM du reseau."""
-    return service.detach_vm(db, identity, project_id, network_id, vm_id)
+    row = await service.detach_vm(
+        db,
+        iam,
+        network,
+        actor_id=identity.user_id,
+        project_id=project_id,
+        network_id=network_id,
+        vm_id=vm_id,
+    )
+    return NetworkOut.model_validate(row)
 
 
 @router.delete(
@@ -102,11 +207,20 @@ def detach_vm(
     summary="Supprimer un reseau",
     responses=error_responses(*_COMMON),
 )
-def delete_network(
+async def delete_network(
     project_id: str,
     network_id: str,
     identity: Identity = Depends(get_current_identity),
+    iam: IamPort = Depends(get_iam),
+    network: NetworkPort = Depends(get_network_port),
     db: Session = Depends(get_db),
 ) -> None:
     """F7 : supprime le reseau."""
-    service.delete_network(db, identity, project_id, network_id)
+    await service.delete_network(
+        db,
+        iam,
+        network,
+        actor_id=identity.user_id,
+        project_id=project_id,
+        network_id=network_id,
+    )

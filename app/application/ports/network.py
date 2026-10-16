@@ -18,6 +18,10 @@ class NetworkUnavailable(NetworkError):
     """Le groupe Reseau ne repond pas dans le delai imparti."""
 
 
+class NetworkNotFound(NetworkError):
+    """Le reseau cible est introuvable cote groupe Reseau."""
+
+
 @dataclass(frozen=True)
 class NetworkRef:
     """Identifiant d'un reseau cote groupe Reseau."""

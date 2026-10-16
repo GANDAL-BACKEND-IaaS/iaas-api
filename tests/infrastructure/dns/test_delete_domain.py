@@ -12,6 +12,7 @@ async def test_delete_domain_is_idempotent():
     await dns.delete_domain("vm-1")
     await dns.delete_domain("vm-1")
     assert dns.deleted == ["vm-1"]
+    assert dns.received == {"vm-1": 2}
 
 
 async def test_delete_domain_when_unavailable():
@@ -20,3 +21,4 @@ async def test_delete_domain_when_unavailable():
     with pytest.raises(DnsUnavailable):
         await dns.delete_domain("vm-1")
     assert dns.deleted == []
+    assert dns.received == {}

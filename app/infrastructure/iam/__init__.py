@@ -1,1 +1,1 @@
-"""Adaptateur du port IAM. Proprietaire : ZUCHUON."""
+"""Adaptateur du port IAM. Proprietaire : Projets/IAM."""

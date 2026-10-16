@@ -76,7 +76,7 @@ Le service `app.features.networks.service` expose 4 fonctions d'intégration ré
 async def detach_vm_from_all_networks(
     db: Session, network_port: NetworkPort, *, vm_id: str
 ) -> None:
-    """Appelé lors de la suppression d'une VM (NAOMI - F6, R21). Idempotent."""
+    """Appelé lors de la suppression d'une VM (VMs - F6, R21). Idempotent."""
 
 async def detach_vm_from_project_networks(
     db: Session, network_port: NetworkPort, *, vm_id: str, project_id: str
@@ -86,7 +86,7 @@ async def detach_vm_from_project_networks(
 async def delete_project_networks(
     db: Session, network_port: NetworkPort, *, project_id: str
 ) -> None:
-    """Appelé lors de la suppression d'un projet en cascade (ZUCHUON - F12, R23). Idempotent."""
+    """Appelé lors de la suppression d'un projet en cascade (Projet/IAM - F12, R23). Idempotent."""
 
 def list_vm_networks(
     db: Session, *, vm_id: str, project_id: str | None = None
@@ -95,10 +95,10 @@ def list_vm_networks(
 ```
 
 ### Points d'accroche identifiés dans le code existant (non modifiés) :
-1. **Équipe VM (NAOMI)** :
+1. **Équipe VM** :
    - Fichier : `app/features/vms/service.py`, ligne 40 (`delete_vm`).
    - Raccordement à faire : Lors de la confirmation de suppression de la VM, avant la destruction finale, appeler `await detach_vm_from_all_networks(db, network, vm_id=vm_id)`.
-2. **Équipe Projets (ZUCHUON)** :
+2. **Équipe Projets** :
    - Fichier : `app/features/projects/service.py`, ligne 30 (`delete_project`).
    - Raccordement à faire : Lors de la suppression en cascade du projet, appeler `await delete_project_networks(db, network, project_id=project_id)`.
 3. **Moteur de partages (`shares`)** :
@@ -178,7 +178,7 @@ L'API est accessible sur `http://localhost:8000`, et Swagger sur `http://localho
    - Copier la valeur de `access_token`.
    - Cliquer sur le bouton **Authorize** en haut à droite, coller le token et valider.
 2. **Création d'un projet & d'une VM** :
-   - Comme les routes de création directe de projet/VM sont réservées à ZUCHUON et NAOMI (501), utiliser le script d'injection rapide ou une session Python locale pour insérer le projet `p1` (propriétaire Alice) et deux VMs `vm-1` et `vm-2`.
+   - Comme les routes de création directe de projet/VM sont réservées à Projet/IAM et VM (501), utiliser le script d'injection rapide ou une session Python locale pour insérer le projet `p1` (propriétaire Alice) et deux VMs `vm-1` et `vm-2`.
 3. **Création d'un réseau** :
    - Dérouler `POST /api/v1/projects/{project_id}/networks`.
    - `project_id` = `p1`, corps = `{"name": "lan-swagger"}`.
@@ -333,6 +333,6 @@ curl -s -w "\nHTTP_STATUS:%{http_code}\n" -X DELETE http://localhost:8000/api/v1
 ## 8. Points ouverts, dettes connues et questions pour l'équipe
 
 1. **Raccordement effectif des collègues** :
-   Les fonctions `detach_vm_from_all_networks` et `delete_project_networks` sont prêtes et testées, mais dépendent de l'implémentation future de `delete_vm` par NAOMI et `delete_project` par ZUCHUON.
+   Les fonctions `detach_vm_from_all_networks` et `delete_project_networks` sont prêtes et testées, mais dépendent de l'implémentation future de `delete_vm` par VMs et `delete_project` par Projet/IAM.
 2. **Synchronisation du renommage avec le port externe** :
    `NetworkPort` ne propose actuellement pas de méthode `rename_network()`. Le renommage est donc purement logique au niveau du backend IaaS (base de données et audit). Si le groupe Réseau technique souhaite être notifié des renommages, il conviendra d'ajouter cette méthode au port ultérieurement.

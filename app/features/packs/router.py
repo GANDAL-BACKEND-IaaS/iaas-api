@@ -4,7 +4,9 @@ from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 
 from app.application.ports.iam import Identity
+from app.application.ports.notifications import NotificationsPort
 from app.core.database import get_db
+from app.core.dependencies import get_notifications
 from app.core.errors import ErrorCode, error_responses
 from app.core.pagination import Page, PageParams, get_page_params
 from app.features.auth.dependencies import get_current_identity, require_admin
@@ -63,14 +65,15 @@ def create_pack(
     summary="Modifier un pack",
     responses=error_responses(*_ADMIN),
 )
-def update_pack(
+async def update_pack(
     pack_id: int,
     body: PackUpdateIn,
     identity: Identity = Depends(require_admin),
+    notifications: NotificationsPort = Depends(get_notifications),
     db: Session = Depends(get_db),
 ) -> PackOut:
     """F17 : modifie un pack. Les demandes de creation en attente sont renvoyees a l'admin (R14)."""
-    return service.update_pack(db, identity, pack_id, body)
+    return await service.update_pack(db, identity, notifications, pack_id, body)
 
 
 @router.delete(

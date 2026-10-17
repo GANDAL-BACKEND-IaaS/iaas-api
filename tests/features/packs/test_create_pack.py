@@ -1,20 +1,25 @@
-"""Route reservee create_pack : elle repond 501 tant que le proprietaire ne l'implemente pas."""
+"""Cas nominaux et limites de la creation de pack (F17)."""
 
 from tests.support import login_header
 
+_BODY = {"name": "Mini", "ram": 1, "cpu": 1, "vram": 1, "ssd": 1}
 
-async def test_create_pack_is_not_implemented(client, iam):
-    """Le contrat est publie, l'implementation metier reste a ecrire."""
+
+async def test_admin_creates_pack(client, iam):
+    """Un administrateur cree un pack."""
     headers = await login_header(iam, "root@x.cm")
-    response = client.request("POST", "/api/v1/admin/packs", headers=headers, json={'name': 'Mini', 'ram': 1, 'cpu': 1, 'vram': 1, 'ssd': 1})
-    assert response.status_code == 501
-    body = response.json()
-    assert body["error"]["code"] == "not_implemented"
-    assert body["error"]["message"]
+    response = client.post("/api/v1/admin/packs", headers=headers, json=_BODY)
+    assert response.status_code == 201
+    assert response.json()["name"] == "Mini"
 
 
-async def test_create_pack_requires_a_token(client):
-    """Sans jeton, la route refuse avant meme d'atteindre l'implementation."""
-    response = client.request("POST", "/api/v1/admin/packs", json={'name': 'Mini', 'ram': 1, 'cpu': 1, 'vram': 1, 'ssd': 1})
-    assert response.status_code == 401
-    assert response.json()["error"]["code"] == "unauthorized"
+async def test_user_cannot_create_pack(client, iam):
+    """Un utilisateur simple recoit 403."""
+    headers = await login_header(iam)
+    response = client.post("/api/v1/admin/packs", headers=headers, json=_BODY)
+    assert response.status_code == 403
+
+
+def test_create_pack_requires_a_token(client):
+    """Sans jeton, la route est refusee."""
+    assert client.post("/api/v1/admin/packs", json=_BODY).status_code == 401

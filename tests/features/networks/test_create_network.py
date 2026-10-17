@@ -1,20 +1,31 @@
-"""Route reservee create_network : elle repond 501 tant que le proprietaire ne l'implemente pas."""
+"""Cas nominaux et limites de la creation de reseau (F7)."""
 
 from tests.support import login_header
 
 
-async def test_create_network_is_not_implemented(client, iam):
-    """Le contrat est publie, l'implementation metier reste a ecrire."""
-    headers = await login_header(iam, "u@x.cm")
-    response = client.request("POST", "/api/v1/projects/p1/networks", headers=headers, json={'name': 'lan'})
-    assert response.status_code == 501
-    body = response.json()
-    assert body["error"]["code"] == "not_implemented"
-    assert body["error"]["message"]
+async def test_create_network(client, iam):
+    """Un membre autorise cree un reseau dans son projet."""
+    headers = await login_header(iam)
+    project = client.post("/api/v1/projects", headers=headers, json={"name": "Alpha"}).json()
+    response = client.post(
+        f"/api/v1/projects/{project['id']}/networks", headers=headers, json={"name": "lan"}
+    )
+    assert response.status_code == 201
+    assert response.json()["name"] == "lan"
+    assert response.json()["vm_ids"] == []
 
 
-async def test_create_network_requires_a_token(client):
-    """Sans jeton, la route refuse avant meme d'atteindre l'implementation."""
-    response = client.request("POST", "/api/v1/projects/p1/networks", json={'name': 'lan'})
-    assert response.status_code == 401
-    assert response.json()["error"]["code"] == "unauthorized"
+async def test_create_network_when_port_down(client, iam, network):
+    """Un reseau indisponible n'enregistre rien."""
+    headers = await login_header(iam)
+    project = client.post("/api/v1/projects", headers=headers, json={"name": "Alpha"}).json()
+    network.available = False
+    response = client.post(
+        f"/api/v1/projects/{project['id']}/networks", headers=headers, json={"name": "lan"}
+    )
+    assert response.status_code == 503
+
+
+def test_create_network_requires_a_token(client):
+    """Sans jeton, la route est refusee."""
+    assert client.post("/api/v1/projects/p1/networks", json={"name": "lan"}).status_code == 401

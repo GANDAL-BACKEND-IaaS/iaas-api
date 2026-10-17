@@ -1,20 +1,27 @@
-"""Route reservee get_project : elle repond 501 tant que le proprietaire ne l'implemente pas."""
+"""Cas nominaux et limites de la consultation d'un projet (F12)."""
 
 from tests.support import login_header
 
 
-async def test_get_project_is_not_implemented(client, iam):
-    """Le contrat est publie, l'implementation metier reste a ecrire."""
-    headers = await login_header(iam, "u@x.cm")
-    response = client.request("GET", "/api/v1/projects/p1", headers=headers)
-    assert response.status_code == 501
-    body = response.json()
-    assert body["error"]["code"] == "not_implemented"
-    assert body["error"]["message"]
+async def test_get_project_for_member(client, iam):
+    """Un membre consulte son projet."""
+    headers = await login_header(iam)
+    created = client.post("/api/v1/projects", headers=headers, json={"name": "Alpha"}).json()
+    response = client.get(f"/api/v1/projects/{created['id']}", headers=headers)
+    assert response.status_code == 200
+    assert response.json()["name"] == "Alpha"
 
 
-async def test_get_project_requires_a_token(client):
-    """Sans jeton, la route refuse avant meme d'atteindre l'implementation."""
-    response = client.request("GET", "/api/v1/projects/p1")
-    assert response.status_code == 401
-    assert response.json()["error"]["code"] == "unauthorized"
+async def test_get_project_hidden_from_outsider(client, iam):
+    """Un etranger recoit un refus."""
+    headers = await login_header(iam)
+    created = client.post("/api/v1/projects", headers=headers, json={"name": "Alpha"}).json()
+    iam.add_user("out@x.cm", "pw")
+    outsider = await login_header(iam, "out@x.cm")
+    response = client.get(f"/api/v1/projects/{created['id']}", headers=outsider)
+    assert response.status_code == 403
+
+
+def test_get_project_requires_a_token(client):
+    """Sans jeton, la route est refusee."""
+    assert client.get("/api/v1/projects/p1").status_code == 401

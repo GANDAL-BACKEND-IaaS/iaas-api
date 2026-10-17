@@ -1,20 +1,19 @@
-"""Route reservee list_storages : elle repond 501 tant que le proprietaire ne l'implemente pas."""
+"""Cas nominaux et limites de la liste des stockages (F10)."""
 
-from tests.support import login_header
-
-
-async def test_list_storages_is_not_implemented(client, iam):
-    """Le contrat est publie, l'implementation metier reste a ecrire."""
-    headers = await login_header(iam, "u@x.cm")
-    response = client.request("GET", "/api/v1/projects/p1/storages", headers=headers)
-    assert response.status_code == 501
-    body = response.json()
-    assert body["error"]["code"] == "not_implemented"
-    assert body["error"]["message"]
+from tests.support import add_storage, login_header
 
 
-async def test_list_storages_requires_a_token(client):
-    """Sans jeton, la route refuse avant meme d'atteindre l'implementation."""
-    response = client.request("GET", "/api/v1/projects/p1/storages")
-    assert response.status_code == 401
-    assert response.json()["error"]["code"] == "unauthorized"
+async def test_list_storages(client, db, iam):
+    """Le proprietaire voit les stockages de son projet."""
+    headers = await login_header(iam)
+    project = client.post("/api/v1/projects", headers=headers, json={"name": "Alpha"}).json()
+    add_storage(db, project["id"], "st-1")
+    response = client.get(f"/api/v1/projects/{project['id']}/storages", headers=headers)
+    assert response.status_code == 200
+    assert response.json()["total"] == 1
+    assert response.json()["items"][0]["shared"] is False
+
+
+def test_list_storages_requires_a_token(client):
+    """Sans jeton, la route est refusee."""
+    assert client.get("/api/v1/projects/p1/storages").status_code == 401

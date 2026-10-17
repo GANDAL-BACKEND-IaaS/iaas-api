@@ -139,6 +139,18 @@ class FakeIamClient(IamPort):
         )
         return (owner, *guests)
 
+    async def delete_project(self, project_id: str) -> None:
+        """Retire le projet du mock, y compris les droits des invites."""
+        self._get_project(project_id)
+        del self._projects[project_id]
+
+    async def find_user_id_by_email(self, email: str) -> str | None:
+        """Cherche un compte par email. None si personne n'a cette adresse."""
+        for record in self._users.values():
+            if record.identity.email == email:
+                return record.identity.user_id
+        return None
+
     # ---- privé ----
     def _issue_token(self, identity: Identity) -> AuthToken:
         return encode_token(identity, self._secret, self._ttl)

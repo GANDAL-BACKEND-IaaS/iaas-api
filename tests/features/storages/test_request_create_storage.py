@@ -1,20 +1,23 @@
-"""Route reservee request_create_storage : elle repond 501 tant que le proprietaire ne l'implemente pas."""
+"""Cas nominaux et limites de la demande de creation de stockage (F8)."""
 
 from tests.support import login_header
 
 
-async def test_request_create_storage_is_not_implemented(client, iam):
-    """Le contrat est publie, l'implementation metier reste a ecrire."""
-    headers = await login_header(iam, "u@x.cm")
-    response = client.request("POST", "/api/v1/projects/p1/storages", headers=headers, json={'name': 'docs', 'size': 10})
-    assert response.status_code == 501
-    body = response.json()
-    assert body["error"]["code"] == "not_implemented"
-    assert body["error"]["message"]
+async def test_request_create_storage_is_pending(client, iam):
+    """La creation depose une demande, sans creer le stockage."""
+    headers = await login_header(iam)
+    project = client.post("/api/v1/projects", headers=headers, json={"name": "Alpha"}).json()
+    response = client.post(
+        f"/api/v1/projects/{project['id']}/storages",
+        headers=headers,
+        json={"name": "docs", "size": 10},
+    )
+    assert response.status_code == 201
+    assert response.json()["kind"] == "storage_create"
+    assert response.json()["status"] == "pending"
 
 
-async def test_request_create_storage_requires_a_token(client):
-    """Sans jeton, la route refuse avant meme d'atteindre l'implementation."""
-    response = client.request("POST", "/api/v1/projects/p1/storages", json={'name': 'docs', 'size': 10})
+def test_request_create_storage_requires_a_token(client):
+    """Sans jeton, la route est refusee."""
+    response = client.post("/api/v1/projects/p1/storages", json={"name": "docs", "size": 10})
     assert response.status_code == 401
-    assert response.json()["error"]["code"] == "unauthorized"

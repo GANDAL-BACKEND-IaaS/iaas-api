@@ -1,20 +1,20 @@
-"""Route reservee list_networks : elle repond 501 tant que le proprietaire ne l'implemente pas."""
+"""Cas nominaux et limites de la liste des reseaux (F7)."""
 
 from tests.support import login_header
 
 
-async def test_list_networks_is_not_implemented(client, iam):
-    """Le contrat est publie, l'implementation metier reste a ecrire."""
-    headers = await login_header(iam, "u@x.cm")
-    response = client.request("GET", "/api/v1/projects/p1/networks", headers=headers)
-    assert response.status_code == 501
-    body = response.json()
-    assert body["error"]["code"] == "not_implemented"
-    assert body["error"]["message"]
+async def test_list_networks(client, iam):
+    """Le projet liste ses reseaux."""
+    headers = await login_header(iam)
+    project = client.post("/api/v1/projects", headers=headers, json={"name": "Alpha"}).json()
+    client.post(
+        f"/api/v1/projects/{project['id']}/networks", headers=headers, json={"name": "lan"}
+    )
+    response = client.get(f"/api/v1/projects/{project['id']}/networks", headers=headers)
+    assert response.status_code == 200
+    assert response.json()["total"] == 1
 
 
-async def test_list_networks_requires_a_token(client):
-    """Sans jeton, la route refuse avant meme d'atteindre l'implementation."""
-    response = client.request("GET", "/api/v1/projects/p1/networks")
-    assert response.status_code == 401
-    assert response.json()["error"]["code"] == "unauthorized"
+def test_list_networks_requires_a_token(client):
+    """Sans jeton, la route est refusee."""
+    assert client.get("/api/v1/projects/p1/networks").status_code == 401

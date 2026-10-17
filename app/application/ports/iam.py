@@ -101,3 +101,11 @@ class IamPort(ABC):
     @abstractmethod
     async def list_members(self, project_id: str) -> tuple[MemberGrant, ...]:
         """Membres du projet, proprietaire inclus, avec leurs droits."""
+
+    @abstractmethod
+    async def delete_project(self, project_id: str) -> None:
+        """Oublie le projet et les droits de ses membres."""
+
+    @abstractmethod
+    async def find_user_id_by_email(self, email: str) -> str | None:
+        """Retourne l'identifiant si le compte existe, sinon None."""

@@ -171,6 +171,40 @@ async def revoke_all_for_resource(
     return rows
 
 
+async def revoke_received_by_project(
+    db: Session,
+    network: NetworkPort,
+    *,
+    actor_id: str,
+    project_id: str,
+) -> None:
+    """Revoque les partages recus par un projet sans supprimer les ressources. Ne commit pas."""
+    rows = list(
+        db.scalars(
+            select(ResourceShare).where(
+                ResourceShare.dest_project_id == project_id,
+                ResourceShare.status == ShareStatus.ACTIVE.value,
+            )
+        )
+    )
+    for row in rows:
+        if row.resource_type == ResourceType.VM.value:
+            try:
+                await network.detach_vm_from_project(VmRef(row.resource_id), project_id)
+            except NetworkUnavailable:
+                raise upstream_unavailable("Reseau") from None
+            _drop_dest_links(db, row.resource_id, project_id)
+        row.status = ShareStatus.REVOKED.value
+        record_audit(
+            db,
+            actor_id=actor_id,
+            action="share.revoked",
+            entity_type="share",
+            entity_id=str(row.id),
+            data={"reason": "dest_project_deleted"},
+        )
+
+
 async def revoke_share(
     db: Session,
     network: NetworkPort,

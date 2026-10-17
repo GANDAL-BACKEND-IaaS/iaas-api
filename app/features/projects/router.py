@@ -7,8 +7,21 @@ L'implementation metier reste a completer dans service.py.
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 
-from app.application.ports.iam import Identity
+from app.application.ports.dns import DnsPort
+from app.application.ports.hypervisor import HypervisorPort
+from app.application.ports.iam import IamPort, Identity
+from app.application.ports.network import NetworkPort
+from app.application.ports.notifications import NotificationsPort
+from app.application.ports.storage import StoragePort
 from app.core.database import get_db
+from app.core.dependencies import (
+    get_dns,
+    get_hypervisor,
+    get_iam,
+    get_network,
+    get_notifications,
+    get_storage,
+)
 from app.core.errors import ErrorCode, error_responses
 from app.core.pagination import Page, PageParams, get_page_params
 from app.features.auth.dependencies import get_current_identity
@@ -59,13 +72,14 @@ _DELETE = (
     summary="Creer un projet",
     responses=error_responses(*_WRITE),
 )
-def create_project(
+async def create_project(
     body: ProjectCreateIn,
     identity: Identity = Depends(get_current_identity),
+    iam: IamPort = Depends(get_iam),
     db: Session = Depends(get_db),
 ) -> ProjectOut:
     """F12 : cree un projet dont l'appelant devient proprietaire."""
-    return service.create_project(db, identity, body.name)
+    return await service.create_project(db, iam, identity, body.name)
 
 
 @router.get(
@@ -75,13 +89,14 @@ def create_project(
     summary="Lister mes projets",
     responses=error_responses(ErrorCode.UNAUTHORIZED, ErrorCode.VALIDATION_ERROR, ErrorCode.NOT_IMPLEMENTED),
 )
-def list_projects(
+async def list_projects(
     identity: Identity = Depends(get_current_identity),
+    iam: IamPort = Depends(get_iam),
     db: Session = Depends(get_db),
     params: PageParams = Depends(get_page_params),
 ) -> Page[ProjectOut]:
     """F12 : liste paginee des projets de l'appelant."""
-    return service.list_projects(db, identity, params)
+    return await service.list_projects(db, iam, identity, params)
 
 
 @router.get(
@@ -91,13 +106,14 @@ def list_projects(
     summary="Consulter un projet",
     responses=error_responses(*_USER),
 )
-def get_project(
+async def get_project(
     project_id: str,
     identity: Identity = Depends(get_current_identity),
+    iam: IamPort = Depends(get_iam),
     db: Session = Depends(get_db),
 ) -> ProjectOut:
     """F12 : consulte un projet dont l'appelant est membre."""
-    return service.get_project(db, identity, project_id)
+    return await service.get_project(db, iam, identity, project_id)
 
 
 @router.patch(
@@ -107,14 +123,15 @@ def get_project(
     summary="Renommer un projet",
     responses=error_responses(*_WRITE),
 )
-def rename_project(
+async def rename_project(
     project_id: str,
     body: ProjectUpdateIn,
     identity: Identity = Depends(get_current_identity),
+    iam: IamPort = Depends(get_iam),
     db: Session = Depends(get_db),
 ) -> ProjectOut:
     """F12 : renomme un projet. Reserve au proprietaire."""
-    return service.rename_project(db, identity, project_id, body.name)
+    return await service.rename_project(db, iam, identity, project_id, body.name)
 
 
 @router.post(
@@ -125,14 +142,21 @@ def rename_project(
     description="Exige une confirmation explicite. Suppression en cascade (R23).",
     responses=error_responses(*_DELETE),
 )
-def delete_project(
+async def delete_project(
     project_id: str,
     body: ConfirmIn,
     identity: Identity = Depends(get_current_identity),
+    iam: IamPort = Depends(get_iam),
+    hypervisor: HypervisorPort = Depends(get_hypervisor),
+    network: NetworkPort = Depends(get_network),
+    dns: DnsPort = Depends(get_dns),
+    storage: StoragePort = Depends(get_storage),
     db: Session = Depends(get_db),
 ) -> None:
     """F12 : supprime le projet et ce qu'il contient, apres confirmation."""
-    service.delete_project(db, identity, project_id, body.confirm)
+    await service.delete_project(
+        db, iam, hypervisor, network, dns, storage, identity, project_id, body.confirm
+    )
 
 
 @router.get(
@@ -142,14 +166,15 @@ def delete_project(
     summary="Lister les membres",
     responses=error_responses(*_USER),
 )
-def list_members(
+async def list_members(
     project_id: str,
     identity: Identity = Depends(get_current_identity),
+    iam: IamPort = Depends(get_iam),
     db: Session = Depends(get_db),
     params: PageParams = Depends(get_page_params),
 ) -> Page[MemberOut]:
     """F12 : liste paginee des membres du projet."""
-    return service.list_members(db, identity, project_id, params)
+    return await service.list_members(db, iam, identity, project_id, params)
 
 
 @router.post(
@@ -160,14 +185,16 @@ def list_members(
     summary="Inviter un utilisateur",
     responses=error_responses(*_WRITE),
 )
-def create_invitation(
+async def create_invitation(
     project_id: str,
     body: InvitationCreateIn,
     identity: Identity = Depends(get_current_identity),
+    iam: IamPort = Depends(get_iam),
+    notifications: NotificationsPort = Depends(get_notifications),
     db: Session = Depends(get_db),
 ) -> InvitationOut:
     """F13 : invite un utilisateur. Les droits d'un invite sont plafonnes aux siens (R8)."""
-    return service.create_invitation(db, identity, project_id, body)
+    return await service.create_invitation(db, iam, notifications, identity, project_id, body)
 
 
 @router.get(
@@ -177,14 +204,15 @@ def create_invitation(
     summary="Lister les invitations",
     responses=error_responses(*_USER),
 )
-def list_invitations(
+async def list_invitations(
     project_id: str,
     identity: Identity = Depends(get_current_identity),
+    iam: IamPort = Depends(get_iam),
     db: Session = Depends(get_db),
     params: PageParams = Depends(get_page_params),
 ) -> Page[InvitationOut]:
     """F13 : liste paginee des invitations du projet."""
-    return service.list_invitations(db, identity, project_id, params)
+    return await service.list_invitations(db, iam, identity, project_id, params)
 
 
 @invitations.post(
@@ -194,13 +222,14 @@ def list_invitations(
     summary="Accepter une invitation",
     responses=error_responses(*_WRITE),
 )
-def accept_invitation(
+async def accept_invitation(
     invitation_id: int,
     identity: Identity = Depends(get_current_identity),
+    iam: IamPort = Depends(get_iam),
     db: Session = Depends(get_db),
 ) -> InvitationOut:
     """F13 : l'invite accepte et devient membre."""
-    return service.accept_invitation(db, identity, invitation_id)
+    return await service.accept_invitation(db, iam, identity, invitation_id)
 
 
 @invitations.post(

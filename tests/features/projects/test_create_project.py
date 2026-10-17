@@ -1,20 +1,19 @@
-"""Route reservee create_project : elle repond 501 tant que le proprietaire ne l'implemente pas."""
+"""Cas nominaux et limites de la creation de projet (F12)."""
 
 from tests.support import login_header
 
 
-async def test_create_project_is_not_implemented(client, iam):
-    """Le contrat est publie, l'implementation metier reste a ecrire."""
-    headers = await login_header(iam, "u@x.cm")
-    response = client.request("POST", "/api/v1/projects", headers=headers, json={'name': 'Alpha'})
-    assert response.status_code == 501
+async def test_create_project_makes_caller_owner(client, iam):
+    """L'appelant devient proprietaire du projet cree."""
+    headers = await login_header(iam)
+    response = client.post("/api/v1/projects", headers=headers, json={"name": "Alpha"})
+    assert response.status_code == 201
     body = response.json()
-    assert body["error"]["code"] == "not_implemented"
-    assert body["error"]["message"]
+    assert body["name"] == "Alpha"
+    me = client.get("/api/v1/auth/me", headers=headers).json()
+    assert body["owner_id"] == me["user_id"]
 
 
-async def test_create_project_requires_a_token(client):
-    """Sans jeton, la route refuse avant meme d'atteindre l'implementation."""
-    response = client.request("POST", "/api/v1/projects", json={'name': 'Alpha'})
-    assert response.status_code == 401
-    assert response.json()["error"]["code"] == "unauthorized"
+def test_create_project_requires_a_token(client):
+    """Sans jeton, la route est refusee."""
+    assert client.post("/api/v1/projects", json={"name": "Alpha"}).status_code == 401

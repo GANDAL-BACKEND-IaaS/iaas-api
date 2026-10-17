@@ -57,48 +57,64 @@ def test_default_profiles_seeded_once(db):
 
 async def test_admin_full_crud(client, iam):
     h = await _headers(iam, "root@x.cm")
-    created = client.post("/admin/profiles", headers=h, json={
+    created = client.post("/api/v1/admin/profiles", headers=h, json={
         "name": "Auditeur", "rights": ["vm.view", "storage.view"]}).json()
     assert created["rights"] == ["storage.view", "vm.view"]
 
     pid = created["id"]
-    patched = client.patch(f"/admin/profiles/{pid}", headers=h,
+    patched = client.patch(f"/api/v1/admin/profiles/{pid}", headers=h,
                            json={"name": "Super auditeur", "rights": ["vm.view"]}).json()
     assert patched["name"] == "Super auditeur" and patched["rights"] == ["vm.view"]
 
-    assert client.delete(f"/admin/profiles/{pid}", headers=h).status_code == 204
-    assert client.patch(f"/admin/profiles/{pid}", headers=h, json={"name": "x"}).status_code == 404
+    assert client.delete(f"/api/v1/admin/profiles/{pid}", headers=h).status_code == 204
+    assert client.patch(f"/api/v1/admin/profiles/{pid}", headers=h, json={"name": "x"}).status_code == 404
 
 
 async def test_default_profiles_are_editable(client, iam, db):
     h = await _headers(iam, "root@x.cm")
     lecteur = next(p for p in service.list_profiles(db) if p.name == "Lecteur")
-    r = client.patch(f"/admin/profiles/{lecteur.id}", headers=h, json={"rights": ["vm.view", "vm.power"]})
+    r = client.patch(f"/api/v1/admin/profiles/{lecteur.id}", headers=h, json={"rights": ["vm.view", "vm.power"]})
     assert r.status_code == 200 and r.json()["rights"] == ["vm.power", "vm.view"]
+
+
+async def test_profiles_are_paginated(client, iam):
+    h = await _headers(iam, "root@x.cm")
+    r = client.get("/api/v1/admin/profiles", headers=h, params={"page": 1, "page_size": 2})
+    assert r.status_code == 200
+    payload = r.json()
+    assert payload["page"] == 1
+    assert payload["page_size"] == 2
+    assert payload["total_items"] == 3
+    assert payload["total_pages"] == 2
+    assert len(payload["items"]) == 2
+
+    default_r = client.get("/api/v1/admin/profiles", headers=h)
+    assert default_r.status_code == 200
+    assert default_r.json()["page_size"] == 20
 
 
 async def test_validation_errors(client, iam):
     h = await _headers(iam, "root@x.cm")
-    assert client.post("/admin/profiles", headers=h,
+    assert client.post("/api/v1/admin/profiles", headers=h,
                        json={"name": "Lecteur"}).status_code == 409
-    assert client.post("/admin/profiles", headers=h,
+    assert client.post("/api/v1/admin/profiles", headers=h,
                        json={"name": "Z", "rights": ["vm.fly"]}).status_code == 422
 
 
 async def test_non_admin_can_read_but_not_mutate(client, iam, db):
-    assert client.get("/admin/profiles").status_code == 401
-    assert client.get("/admin/rights").status_code == 401
+    assert client.get("/api/v1/admin/profiles").status_code == 401
+    assert client.get("/api/v1/admin/rights").status_code == 401
 
     h = await _headers(iam, "u@x.cm")
-    assert client.get("/admin/profiles", headers=h).status_code == 200
-    assert client.get("/admin/rights", headers=h).status_code == 200
+    assert client.get("/api/v1/admin/profiles", headers=h).status_code == 200
+    assert client.get("/api/v1/admin/rights", headers=h).status_code == 200
 
-    assert client.post("/admin/profiles", headers=h,
+    assert client.post("/api/v1/admin/profiles", headers=h,
                        json={"name": "Pirate", "rights": ["vm.delete"]}).status_code == 403
     lecteur = next(p for p in service.list_profiles(db) if p.name == "Lecteur")
-    assert client.patch(f"/admin/profiles/{lecteur.id}", headers=h,
+    assert client.patch(f"/api/v1/admin/profiles/{lecteur.id}", headers=h,
                         json={"name": "Piraté"}).status_code == 403
-    assert client.delete(f"/admin/profiles/{lecteur.id}", headers=h).status_code == 403
+    assert client.delete(f"/api/v1/admin/profiles/{lecteur.id}", headers=h).status_code == 403
 
 
 def test_resolve_rights_profile_plus_extras(db):

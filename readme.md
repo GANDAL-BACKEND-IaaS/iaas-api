@@ -47,6 +47,24 @@ http://localhost:8000/docs.
 Au démarrage, les tables sont créées automatiquement et le catalogue de droits ainsi que les
 profils par défaut sont insérés. Alembic remplacera ce mécanisme provisoire.
 
+### Lancer avec Docker Compose
+
+Prérequis : Docker avec le plugin Compose.
+
+```bash
+cp -n .env.example .env
+# Remplacer IAM_JWT_SECRET dans .env par une valeur longue et aléatoire.
+docker compose up --build
+```
+
+L'API est ensuite disponible sur http://localhost:8000 et Swagger sur
+http://localhost:8000/docs. Compose stocke la base SQLite dans le volume Docker `iaas-data` ;
+elle reste donc présente après `docker compose down`. Pour la supprimer également, exécuter
+`docker compose down --volumes`.
+
+Les utilisateurs de démonstration sont activés par défaut pour le mock IAM, comme en démarrage
+local. Ne pas conserver les identifiants et le secret de développement dans un déploiement.
+
 ### Comptes de démonstration
 
 Avec `IAM_SEED_DEMO_USERS=true` (valeur par défaut), le mock IAM crée :
@@ -75,25 +93,25 @@ Variables d'environnement (fichier `.env`) :
 
 | Méthode | Route | Accès | Description |
 |---|---|---|---|
-| POST | `/auth/login` | public | Connexion, renvoie un jeton Bearer |
-| GET | `/auth/me` | connecté | Identité de l'utilisateur courant |
-| PATCH | `/auth/me` | connecté | Modifier ses informations (renvoie un nouveau jeton) |
-| POST | `/auth/password` | connecté | Changer son mot de passe |
-| DELETE | `/auth/me` | connecté | Supprimer son compte |
-| GET | `/admin/rights` | connecté | Lister le catalogue de droits |
-| GET | `/admin/profiles` | connecté | Lister les profils de droits |
-| POST | `/admin/profiles` | admin | Créer un profil |
-| PATCH | `/admin/profiles/{id}` | admin | Modifier un profil |
-| DELETE | `/admin/profiles/{id}` | admin | Supprimer un profil |
+| POST | `/api/v1/auth/login` | public | Connexion, renvoie un jeton Bearer |
+| GET | `/api/v1/auth/me` | connecté | Identité de l'utilisateur courant |
+| PATCH | `/api/v1/auth/me` | connecté | Modifier ses informations (renvoie un nouveau jeton) |
+| POST | `/api/v1/auth/password` | connecté | Changer son mot de passe |
+| DELETE | `/api/v1/auth/me` | connecté | Supprimer son compte |
+| GET | `/api/v1/admin/rights` | connecté | Lister le catalogue de droits |
+| GET | `/api/v1/admin/profiles` | connecté | Lister les profils de droits |
+| POST | `/api/v1/admin/profiles` | admin | Créer un profil |
+| PATCH | `/api/v1/admin/profiles/{id}` | admin | Modifier un profil |
+| DELETE | `/api/v1/admin/profiles/{id}` | admin | Supprimer un profil |
 
 Exemple :
 
 ```bash
-TOKEN=$(curl -s -X POST localhost:8000/auth/login \
+TOKEN=$(curl -s -X POST localhost:8000/api/v1/auth/login \
   -H "Content-Type: application/json" \
   -d '{"email":"alice@iaas.cm","password":"alice123"}' | python -c "import sys,json;print(json.load(sys.stdin)['access_token'])")
 
-curl localhost:8000/auth/me -H "Authorization: Bearer $TOKEN"
+curl localhost:8000/api/v1/auth/me -H "Authorization: Bearer $TOKEN"
 ```
 
 ## Modèle de droits (résumé)

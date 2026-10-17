@@ -1,0 +1,15 @@
+services:
+  api:
+    build: .
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: sqlite:////data/iaas.db
+    ports:
+      - "8000:8000"
+    volumes:
+      - iaas-data:/data
+    restart: unless-stopped
+
+volumes:
+  iaas-data:

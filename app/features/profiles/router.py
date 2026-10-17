@@ -1,10 +1,16 @@
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.features.auth.dependencies import get_current_identity, require_admin
 from app.features.profiles import service
-from app.features.profiles.schemas import ProfileCreate, ProfileOut, ProfileUpdate, RightOut
+from app.features.profiles.schemas import (
+    PaginatedProfilesOut,
+    ProfileCreate,
+    ProfileOut,
+    ProfileUpdate,
+    RightOut,
+)
 
 router = APIRouter(prefix="/admin")
 
@@ -23,10 +29,25 @@ def list_rights(db: Session = Depends(get_db)):
     return service.list_rights(db)
 
 
-@router.get("/profiles", response_model=list[ProfileOut], tags=["profils & droits (consultation)"],
+@router.get("/profiles", response_model=PaginatedProfilesOut, tags=["profils & droits (consultation)"],
             dependencies=[Depends(get_current_identity)])
-def list_profiles(db: Session = Depends(get_db)):
-    return service.list_profiles(db)
+def list_profiles(
+    page: int = Query(1, ge=1, description="Numéro de page (commence à 1)"),
+    page_size: int = Query(20, ge=1, le=100, description="Nombre d'éléments par page"),
+    db: Session = Depends(get_db),
+):
+    profiles = service.list_profiles(db)
+    total_items = len(profiles)
+    total_pages = (total_items + page_size - 1) // page_size if total_items else 0
+    start = (page - 1) * page_size
+    end = start + page_size
+    return PaginatedProfilesOut(
+        items=profiles[start:end],
+        page=page,
+        page_size=page_size,
+        total_items=total_items,
+        total_pages=total_pages,
+    )
 
 
 @router.post("/profiles", response_model=ProfileOut, status_code=status.HTTP_201_CREATED,

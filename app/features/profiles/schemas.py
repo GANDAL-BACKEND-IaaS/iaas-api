@@ -20,6 +20,14 @@ class ProfileOut(BaseModel):
         return sorted(r.code if hasattr(r, "code") else r for r in v)
 
 
+class PaginatedProfilesOut(BaseModel):
+    items: list[ProfileOut]
+    page: int
+    page_size: int
+    total_items: int
+    total_pages: int
+
+
 class ProfileCreate(BaseModel):
     name: str = Field(min_length=1, max_length=64)
     description: str = Field(default="", max_length=255)

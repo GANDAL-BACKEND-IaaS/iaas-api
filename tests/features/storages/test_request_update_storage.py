@@ -11,16 +11,16 @@ async def test_request_update_storage_is_pending(client, db, iam):
     response = client.post(
         f"/api/v1/projects/{project['id']}/storages/st-1/update-requests",
         headers=headers,
-        json={"size": 20},
+        json={"size_gb": 20},
     )
     assert response.status_code == 202
     assert response.json()["kind"] == "storage_update"
-    assert response.json()["payload"]["size"] == 20
+    assert response.json()["payload"]["size_gb"] == 20
 
 
 def test_request_update_storage_requires_a_token(client):
     """Sans jeton, la route est refusee."""
     response = client.post(
-        "/api/v1/projects/p1/storages/st-1/update-requests", json={"size": 20}
+        "/api/v1/projects/p1/storages/st-1/update-requests", json={"size_gb": 20}
     )
     assert response.status_code == 401

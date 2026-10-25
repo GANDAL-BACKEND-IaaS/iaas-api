@@ -91,6 +91,14 @@ class IamPort(ABC):
         """Remplace les droits d'un membre (hors propriétaire)."""
 
     @abstractmethod
+    async def remove_member(self, user_id: str, project_id: str) -> None:
+        """Retire un membre invite du projet et ses droits."""
+
+    @abstractmethod
+    async def get_user(self, user_id: str) -> Identity:
+        """Retourne l'identite connue de l'IAM, ou leve UserNotFound."""
+
+    @abstractmethod
     async def get_rights(self, user_id: str, project_id: str) -> frozenset[Right]:
         """Droits de l'utilisateur sur le projet. Vide s'il n'est pas membre."""
 

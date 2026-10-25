@@ -1,27 +1,25 @@
-"""Routes stockage orientees ressource. Proprietaire : TABA."""
+"""Routes stockage orientees ressource."""
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Body, Depends, Query, status
 from sqlalchemy.orm import Session
 
 from app.application.ports.iam import IamPort, Identity
-from app.application.ports.network import NetworkPort
 from app.application.ports.storage import StoragePort
 from app.core.database import get_db
-from app.core.dependencies import get_iam, get_network
+from app.core.dependencies import get_iam
 from app.core.dependencies import get_storage as get_storage_port
 from app.core.errors import ErrorCode, error_responses
 from app.core.pagination import Page, PageParams, get_page_params
 from app.features.auth.dependencies import get_current_identity
-from app.features.requests.schemas import RequestOut
-from app.features.shares.schemas import ShareOut
-from app.features.storages import service
-from app.features.storages.schemas import (
-    ConfirmIn,
-    ShareTargetIn,
-    StorageOut,
-    StorageRequestCreateIn,
-    StorageRequestUpdateIn,
+from app.features.requests.schemas import (
+    RequestOut,
+    StorageCreateRequestIn,
+    StorageUpdateRequestIn,
 )
+from app.features.storages import service
+from app.features.storages.schemas import StorageOut
+from app.shared.deletion import DeletionIn, DeletionResponse
+from app.shared.enums import StorageState
 
 router = APIRouter(prefix="/projects/{project_id}/storages", tags=["stockages"])
 
@@ -31,7 +29,6 @@ _COMMON = (
     ErrorCode.NOT_FOUND,
     ErrorCode.VALIDATION_ERROR,
     ErrorCode.INVALID_STATE,
-    ErrorCode.NOT_IMPLEMENTED,
     ErrorCode.UPSTREAM_UNAVAILABLE,
 )
 
@@ -46,7 +43,7 @@ _COMMON = (
 )
 async def request_create_storage(
     project_id: str,
-    body: StorageRequestCreateIn,
+    body: StorageCreateRequestIn,
     identity: Identity = Depends(get_current_identity),
     iam: IamPort = Depends(get_iam),
     db: Session = Depends(get_db),
@@ -68,9 +65,23 @@ async def list_storages(
     iam: IamPort = Depends(get_iam),
     db: Session = Depends(get_db),
     params: PageParams = Depends(get_page_params),
+    state: StorageState | None = Query(default=None),
+    shared: bool | None = Query(default=None),
+    ip_address: str | None = Query(default=None, max_length=45),
+    name: str | None = Query(default=None, max_length=128),
 ) -> Page[StorageOut]:
     """F10 : liste les stockages du projet, y compris les stockages partages."""
-    return await service.list_storages(db, iam, identity, project_id, params)
+    return await service.list_storages(
+        db,
+        iam,
+        identity,
+        project_id,
+        params,
+        state=state,
+        shared=shared,
+        ip_address=ip_address,
+        name=name,
+    )
 
 
 @router.get(
@@ -97,61 +108,40 @@ async def get_storage(
     status_code=status.HTTP_202_ACCEPTED,
     operation_id="request_update_storage",
     summary="Demander la modification d'un stockage",
-    responses=error_responses(*_COMMON),
+    responses=error_responses(*_COMMON, ErrorCode.BAD_REQUEST, ErrorCode.CONFLICT),
 )
 async def request_update_storage(
     project_id: str,
     storage_id: str,
-    body: StorageRequestUpdateIn,
+    body: StorageUpdateRequestIn,
     identity: Identity = Depends(get_current_identity),
     iam: IamPort = Depends(get_iam),
     db: Session = Depends(get_db),
 ) -> RequestOut:
     """F9 : la modification porte uniquement sur la taille."""
-    return await service.request_update_storage(db, iam, identity, project_id, storage_id, body)
-
-
-@router.post(
-    "/{storage_id}/deletion",
-    status_code=status.HTTP_204_NO_CONTENT,
-    operation_id="delete_storage",
-    summary="Supprimer un stockage",
-    description="Action directe, meme si le stockage contient des donnees. Confirmation exigee.",
-    responses=error_responses(*_COMMON),
-)
-async def delete_storage(
-    project_id: str,
-    storage_id: str,
-    body: ConfirmIn,
-    identity: Identity = Depends(get_current_identity),
-    iam: IamPort = Depends(get_iam),
-    port: StoragePort = Depends(get_storage_port),
-    network: NetworkPort = Depends(get_network),
-    db: Session = Depends(get_db),
-) -> None:
-    """F11 : supprime le stockage apres confirmation et revoque ses partages."""
-    await service.delete_storage(
-        db, iam, port, identity, project_id, storage_id, body.confirm, network
+    return await service.request_update_storage(
+        db, iam, identity, project_id, storage_id, body
     )
 
 
 @router.post(
-    "/{storage_id}/shares",
-    response_model=ShareOut,
-    status_code=status.HTTP_201_CREATED,
-    operation_id="share_storage",
-    summary="Partager un stockage",
-    responses=error_responses(*_COMMON, ErrorCode.CONFLICT),
+    "/{storage_id}/deletion",
+    response_model=DeletionResponse,
+    operation_id="delete_storage",
+    summary="Supprimer un stockage",
+    description="Protocole en deux temps. Les donnees sont perdues meme si le stockage est non vide.",
+    responses=error_responses(*_COMMON, ErrorCode.BAD_REQUEST),
 )
-async def share_storage(
+async def delete_storage(
     project_id: str,
     storage_id: str,
-    body: ShareTargetIn,
     identity: Identity = Depends(get_current_identity),
     iam: IamPort = Depends(get_iam),
+    port: StoragePort = Depends(get_storage_port),
     db: Session = Depends(get_db),
-) -> ShareOut:
-    """F14 : partage le stockage avec un autre projet du meme proprietaire."""
-    return await service.share_storage(
-        db, iam, identity, project_id, storage_id, body.dest_project_id
+    body: DeletionIn = Body(default_factory=DeletionIn),
+):
+    """F11 : apercu puis suppression effective du stockage."""
+    return await service.delete_storage(
+        db, iam, port, identity, project_id, storage_id, body.confirmation_text
     )

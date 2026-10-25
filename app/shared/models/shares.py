@@ -8,7 +8,7 @@ from datetime import datetime
 from sqlalchemy import DateTime, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.shared.models.base import Base
+from app.shared.models.base import Base, new_id
 from app.shared.time import utcnow
 
 
@@ -17,7 +17,7 @@ class ResourceShare(Base):
 
     __tablename__ = "resource_shares"
 
-    id: Mapped[int] = mapped_column(primary_key=True)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     resource_type: Mapped[str] = mapped_column(String(16))
     resource_id: Mapped[str] = mapped_column(String(36), index=True)
     origin_project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)

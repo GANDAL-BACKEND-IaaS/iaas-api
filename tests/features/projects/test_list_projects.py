@@ -9,7 +9,7 @@ async def test_list_projects_returns_owned(client, iam):
     client.post("/api/v1/projects", headers=headers, json={"name": "Alpha"})
     response = client.get("/api/v1/projects", headers=headers)
     assert response.status_code == 200
-    assert response.json()["total"] == 1
+    assert response.json()["total_items"] == 1
     assert response.json()["items"][0]["name"] == "Alpha"
 
 

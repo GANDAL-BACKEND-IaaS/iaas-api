@@ -1,61 +1,51 @@
-"""Schemas VM et packs. Proprietaire : NAOMI."""
+"""Schemas VM."""
 
-from datetime import datetime
-from typing import Literal
+from pydantic import BaseModel, ConfigDict, field_validator
 
-from pydantic import BaseModel, ConfigDict, Field
-
-from app.shared.enums import PowerAction, VmState
+from app.shared.enums import PowerAction, PowerState, VmState
+from app.shared.time import UtcDateTime
 
 
-class VmRequestCreateIn(BaseModel):
-    """Demande de creation de VM : pack ou configuration personnalisee (F1, R13)."""
+class VMPowerIn(BaseModel):
+    """Action directe d'alimentation (F4)."""
 
-    model_config = ConfigDict(
-        json_schema_extra={
-            "examples": [{"name": "web", "ram": 2048, "cpu": 2, "vram": 128, "ssd": 40}]
-        }
-    )
+    model_config = ConfigDict(json_schema_extra={"examples": [{"action": "start"}]})
 
-    name: str = Field(min_length=1, max_length=128)
-    pack_id: int | None = None
-    ram: int | None = Field(default=None, gt=0)
-    cpu: int | None = Field(default=None, gt=0)
-    vram: int | None = Field(default=None, gt=0)
-    ssd: int | None = Field(default=None, gt=0)
+    action: PowerAction
 
 
-class VmRequestUpdateIn(BaseModel):
-    """Demande de modification des caracteristiques de base (F2)."""
+class PowerOut(BaseModel):
+    """Accuse d'une action d'alimentation : etat transitoire expose (202)."""
 
-    ram: int | None = Field(default=None, gt=0)
-    cpu: int | None = Field(default=None, gt=0)
-    vram: int | None = Field(default=None, gt=0)
-    ssd: int | None = Field(default=None, gt=0)
+    vm_id: str
+    action: PowerAction
+    state: PowerState
 
 
-class VmOut(BaseModel):
-    """VM renvoyee par l'API, y compris son etat connu."""
+class VMOut(BaseModel):
+    """VM renvoyee par l'API, avec son IP et ses caracteristiques en unites explicites."""
 
     model_config = ConfigDict(from_attributes=True)
 
     id: str
     origin_project_id: str
     name: str
-    ram: int
-    cpu: int
-    vram: int
-    ssd: int
-    pack_id: int | None
+    ip_address: str | None
+    ram_gb: int
+    vcpu: int
+    vram_gb: int
+    ssd_gb: int
     state: VmState
-    created_at: datetime
     shared: bool = False
+    created_at: UtcDateTime
 
-
-class PowerIn(BaseModel):
-    """Action directe d'alimentation (F4)."""
-
-    action: PowerAction
+    @field_validator("state", mode="before")
+    @classmethod
+    def _unknown_state(cls, value):
+        """Un etat inconnu du backend est expose comme `unknown`, jamais comme un succes."""
+        if isinstance(value, str) and value not in VmState._value2member_map_:
+            return VmState.UNKNOWN
+        return value
 
 
 class ConsoleOut(BaseModel):
@@ -63,15 +53,3 @@ class ConsoleOut(BaseModel):
 
     url: str
     expires_in: int
-
-
-class ShareTargetIn(BaseModel):
-    """Projet destinataire d'un partage de VM (F14)."""
-
-    dest_project_id: str = Field(min_length=1, max_length=36)
-
-
-class ConfirmIn(BaseModel):
-    """Confirmation explicite avant suppression (R6)."""
-
-    confirm: Literal[True]

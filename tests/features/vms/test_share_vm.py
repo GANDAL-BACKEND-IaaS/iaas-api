@@ -33,7 +33,7 @@ async def test_share_vm_from_other_project_is_forbidden(client, db, iam):
         headers=headers,
         json={"dest_project_id": "p1"},
     )
-    assert response.status_code == 403
+    assert response.status_code == 400
 
 
 def test_share_vm_requires_a_token(client):

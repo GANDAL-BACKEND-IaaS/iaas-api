@@ -17,7 +17,7 @@ Tout le monde travaille sur la branche `develop`. Chaque developpeur ne modifie 
 
 Le socle partage (a ne modifier qu'ensemble) : `app/core/`, `app/api/`, `app/features/requests/`, `app/features/shares/`, `app/shared/policies/`, `app/shared/models/` hors fichiers nommes ci-dessus, `app/application/ports/notifications.py`, `app/infrastructure/notifications/`.
 
-Les routes orientees ressource (projets, VMs, packs, reseaux, stockages) repondent `501` tant que leur proprietaire ne les a pas implementees. Le contrat (schemas, erreurs) est deja publie. Les moteurs `POST /api/v1/requests` et `POST /api/v1/shares` sont operationnels.
+Toutes les routes metier decrites par le contrat sont implementees. Le seul endpoint conserve mais encore non reimplemente est `POST /api/v1/projects/{project_id}/vms/{vm_id}/console` : il repond selon le contrat actuel et sera rebranche sur une autre technologie ulterieurement. Deux routes de lecture sont ajoutees hors contrat : `GET /api/v1/shares` et `GET /api/v1/shares/{share_id}`.
 
 ## Architecture
 
@@ -46,9 +46,10 @@ docker compose up --build
 ```
 
 - API : <http://localhost:8000>
-- Documentation : <http://localhost:8000/api/v1/docs>
-- Schema OpenAPI : <http://localhost:8000/api/v1/openapi.json>
-- Sante : <http://localhost:8000/api/v1/health>
+- Documentation : <http://localhost:8000/docs>
+- Schema OpenAPI : <http://localhost:8000/openapi.json>
+- Sante : <http://localhost:8000/health> (alias versionne : `/api/v1/health`)
+- Disponibilite : <http://localhost:8000/ready> ; verifie la connexion a la base et est documentee dans Swagger. Les groupes externes restent des mocks et ne sont pas sondes.
 
 Les comptes de demonstration du mock IAM :
 
@@ -66,9 +67,22 @@ Toutes les routes sont sous `/api/v1`.
 
 - Chaque corps de requete est un schema Pydantic.
 - Chaque succes a un `response_model` (sauf `204`).
-- Les listes sont des pages : `items`, `total`, `page`, `page_size`.
-- Toute erreur a la forme `{"error": {"code": "...", "message": "...", "details": ...}}`.
-- Les codes stables sont `unauthorized`, `forbidden`, `not_found`, `conflict`, `validation_error`, `bad_request`, `invalid_state`, `upstream_unavailable`, `not_implemented`, `internal_error`.
+- Les listes sont des pages : `items`, `page`, `page_size`, `total_items`, `total_pages`. Une page vide renvoie `200` avec `items: []` et `total_pages: 0`.
+- Toute erreur a la forme `{"error": {"code": "...", "message": "...", "details": ...}}`, avec `details` toujours present.
+- Les codes stables sont `unauthorized`, `forbidden`, `not_found`, `conflict`, `validation_error`, `bad_request`, `invalid_state`, `upstream_unavailable`, `internal_error`.
+- Les suppressions suivent un protocole en deux temps : un premier appel sans corps renvoie `confirmation_required`, `confirmation_text` et `warning` ; le second appel doit renvoyer exactement `{"confirmation_text": "SUPPRIMER <nom>"}` et produit `{"deleted": true, ...}`. Un texte errone renvoie `400`, une ressource deja supprimee `404`, une panne externe `503` sans suppression locale.
+- Les actions d'alimentation renvoient `202` avec un etat transitoire (`starting`, `stopping`, `restarting`).
+- Les dates sont en ISO 8601 UTC avec suffixe `Z`.
+- Les identifiants d'objets sont des chaines UUID. Les unites sont explicites : RAM, VRAM et stockage en Go (`ram_gb`, `vram_gb`, `size_gb`, `ssd_gb`) et processeur en vCPU (`vcpu`).
+
+### Choix d'implementation
+
+- **Identifiants UUID partout** : `profile_id` et `request_id` sont aussi des chaines UUID, alors que le document de contrat les montre comme des entiers. C'est le seul ecart volontaire ; il est isole dans les schemas et les modeles pour pouvoir revenir au contrat si necessaire.
+- **Unicite du nom de projet** : le nom est unique par proprietaire, a la creation comme au renommage (`409` en cas de doublon). Le proprietaire est le perimetre naturel puisqu'il est le seul a pouvoir partager entre ses projets.
+- **Partages** : `GET /api/v1/shares` et `GET /api/v1/shares/{share_id}` sont des extensions de lecture. Un administrateur global ne voit pas les partages des utilisateurs : seul le membership d'un projet concerne donne acces.
+- **Invitations** : `POST /api/v1/projects/{project_id}/invitations` accepte soit `email`, soit `invitee_id`, mais pas les deux. L'email est normalise puis resolu aupres de l'IAM ; un email inconnu renvoie `404`. La base conserve l'identifiant IAM canonique et un instantane `invitee_email` pour l'affichage.
+- **Packs** : l'identifiant est un UUID opaque ; le nom est unique.
+- **Droits** : `GET /api/v1/admin/rights` renvoie un tableau JSON simple, trie par `code`, sans pagination.
 
 Exemple :
 

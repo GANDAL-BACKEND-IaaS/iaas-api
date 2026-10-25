@@ -5,10 +5,12 @@ import pytest
 from app.core.errors import AppError, ErrorCode
 from app.features.requests.service import submit_request
 from app.shared.enums import RequestKind, RequestStatus
-from app.shared.models.packs import Pack
-from tests.support import add_storage, add_vm, own_project
+from tests.support import add_pack, add_storage, add_vm, own_project
 
-_CUSTOM = {"name": "web", "ram": 2048, "cpu": 2, "vram": 128, "ssd": 40}
+_CUSTOM = {
+    "name": "web",
+    "configuration": {"ram_gb": 2, "vcpu": 2, "vram_gb": 1, "ssd_gb": 40},
+}
 
 
 async def test_submit_custom_vm_is_pending(db, iam):
@@ -24,16 +26,14 @@ async def test_submit_custom_vm_is_pending(db, iam):
         target_resource_id=None,
     )
     assert row.status == RequestStatus.PENDING.value
-    assert row.payload["ram"] == 2048
-    assert row.payload["pack_id"] is None
+    assert row.payload["configuration"]["ram_gb"] == 2
+    assert "pack_id" not in row.payload
 
 
 async def test_submit_pack_copies_pack_values(db, iam):
     """Choisir un pack fige les caracteristiques du pack dans la demande."""
     uid = await own_project(db, iam)
-    pack = Pack(name="Standard", ram=1024, cpu=1, vram=64, ssd=20)
-    db.add(pack)
-    db.commit()
+    pack = add_pack(db, "Standard", ram_gb=1, vcpu=1, vram_gb=1, ssd_gb=20)
     row = await submit_request(
         db,
         iam,
@@ -43,16 +43,14 @@ async def test_submit_pack_copies_pack_values(db, iam):
         payload={"name": "web", "pack_id": pack.id},
         target_resource_id=None,
     )
-    assert row.payload["ram"] == 1024
+    assert row.payload["ram_gb"] == 1
     assert row.payload["pack_id"] == pack.id
 
 
 async def test_submit_rejects_pack_and_custom_together(db, iam):
     """R13 : pack ou configuration personnalisee, pas les deux."""
     uid = await own_project(db, iam)
-    pack = Pack(name="Standard", ram=1024, cpu=1, vram=64, ssd=20)
-    db.add(pack)
-    db.commit()
+    pack = add_pack(db, "Standard", ram_gb=1, vcpu=1, vram_gb=1, ssd_gb=20)
     payload = {**_CUSTOM, "pack_id": pack.id}
     with pytest.raises(AppError) as exc:
         await submit_request(
@@ -68,7 +66,8 @@ async def test_submit_rejects_incomplete_custom(db, iam):
     with pytest.raises(AppError) as exc:
         await submit_request(
             db, iam, author_id=uid, project_id="p1", kind=RequestKind.VM_CREATE,
-            payload={"name": "web", "ram": 1}, target_resource_id=None,
+            payload={"name": "web", "configuration": {"ram_gb": 1}},
+            target_resource_id=None,
         )
     assert exc.value.code == ErrorCode.VALIDATION_ERROR
 
@@ -79,7 +78,7 @@ async def test_submit_unknown_pack_is_not_found(db, iam):
     with pytest.raises(AppError) as exc:
         await submit_request(
             db, iam, author_id=uid, project_id="p1", kind=RequestKind.VM_CREATE,
-            payload={"name": "web", "pack_id": 999}, target_resource_id=None,
+            payload={"name": "web", "pack_id": "inconnu"}, target_resource_id=None,
         )
     assert exc.value.code == ErrorCode.NOT_FOUND
 
@@ -102,7 +101,7 @@ async def test_submit_storage_update_requires_target(db, iam):
     with pytest.raises(AppError) as exc:
         await submit_request(
             db, iam, author_id=uid, project_id="p1", kind=RequestKind.STORAGE_UPDATE,
-            payload={"size": 10}, target_resource_id=None,
+            payload={"size_gb": 10}, target_resource_id=None,
         )
     assert exc.value.code == ErrorCode.VALIDATION_ERROR
 
@@ -113,10 +112,11 @@ async def test_submit_update_on_visible_vm(db, iam):
     add_vm(db, "p1")
     row = await submit_request(
         db, iam, author_id=uid, project_id="p1", kind=RequestKind.VM_UPDATE,
-        payload={"ram": 4096}, target_resource_id="vm-1",
+        payload={"configuration": {"ram_gb": 4, "vcpu": 2, "vram_gb": 0, "ssd_gb": 40}},
+        target_resource_id="vm-1",
     )
     assert row.target_resource_id == "vm-1"
-    assert row.payload["ram"] == 4096
+    assert row.payload["configuration"]["ram_gb"] == 4
 
 
 async def test_submit_rejects_deleting_storage(db, iam):
@@ -126,6 +126,6 @@ async def test_submit_rejects_deleting_storage(db, iam):
     with pytest.raises(AppError) as exc:
         await submit_request(
             db, iam, author_id=uid, project_id="p1", kind=RequestKind.STORAGE_UPDATE,
-            payload={"size": 10}, target_resource_id="st-1",
+            payload={"size_gb": 10}, target_resource_id="st-1",
         )
     assert exc.value.code == ErrorCode.INVALID_STATE

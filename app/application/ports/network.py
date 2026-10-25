@@ -1,6 +1,7 @@
 """Port Reseau.
 
-Contrat a convenir avec le groupe Reseau : rattacher une VM, l'en retirer, notion de reseau.
+Contrat a convenir avec le groupe Reseau : creer/renommer/supprimer un reseau,
+rattacher une VM, l'en retirer.
 Les appels sont rejouables sans effet de bord et bornes par un delai maximal.
 """
 
@@ -31,6 +32,10 @@ class NetworkPort(ABC):
     @abstractmethod
     async def create_network(self, project_id: str, name: str) -> NetworkRef:
         """Cree un reseau dans un projet."""
+
+    @abstractmethod
+    async def rename_network(self, network: NetworkRef, name: str) -> None:
+        """Renomme un reseau existant."""
 
     @abstractmethod
     async def attach_vm(self, network: NetworkRef, vm: VmRef) -> None:

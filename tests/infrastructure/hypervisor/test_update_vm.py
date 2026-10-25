@@ -11,7 +11,7 @@ async def test_update_vm_replaces_spec():
     hypervisor = FakeHypervisor()
     ref = await hypervisor.create_vm(VmSpec("web", 1, 1, 1, 1))
     await hypervisor.update_vm(ref, VmSpec("web", 4, 2, 1, 8))
-    assert hypervisor.vms[ref.vm_id].ram == 4
+    assert hypervisor.vms[ref.vm_id].ram_gb == 4
 
 
 async def test_update_unknown_vm():

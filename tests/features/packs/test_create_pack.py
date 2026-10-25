@@ -2,7 +2,7 @@
 
 from tests.support import login_header
 
-_BODY = {"name": "Mini", "ram": 1, "cpu": 1, "vram": 1, "ssd": 1}
+_BODY = {"name": "Mini", "ram_gb": 1, "vcpu": 1, "vram_gb": 1, "ssd_gb": 1}
 
 
 async def test_admin_creates_pack(client, iam):

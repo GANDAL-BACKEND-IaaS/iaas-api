@@ -30,6 +30,11 @@ def _hash(password: str) -> str:
     return hashlib.sha256(password.encode()).hexdigest()
 
 
+def stable_user_id(email: str) -> str:
+    """Identifiant deterministe d'un compte de demo : stable entre deux redemarrages."""
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"iaas:user:{email.lower()}"))
+
+
 @dataclass
 class _UserRecord:
     identity: Identity
@@ -59,9 +64,25 @@ class FakeIamClient(IamPort):
     def add_user(self, email: str, password: str, first_name: str = "", last_name: str = "",
                  role: GlobalRole = GlobalRole.USER, user_id: str | None = None) -> Identity:
         self._ensure_email_free(email)
-        identity = Identity(user_id or str(uuid.uuid4()), email, first_name, last_name, role)
+        identity = Identity(user_id or stable_user_id(email), email, first_name, last_name, role)
         self._users[identity.user_id] = _UserRecord(identity, _hash(password))
         return identity
+
+    def restore_project(
+        self,
+        project_id: str,
+        owner_id: str,
+        grants: dict[str, Collection[Right]],
+    ) -> None:
+        """Rehydrate un projet depuis la base metier (appele au demarrage).
+
+        Les utilisateurs inconnus du mock sont ignores : ils ne peuvent pas se connecter
+        et ne doivent pas rendre le projet inaccessible a son proprietaire.
+        """
+        if owner_id not in self._users:
+            return
+        known = {user: self._checked(rights) for user, rights in grants.items() if user in self._users}
+        self._projects[project_id] = _ProjectRecord(owner_id=owner_id, grants=known)
 
     # ---- port ----
     async def login(self, email: str, password: str) -> AuthToken:
@@ -119,6 +140,18 @@ class FakeIamClient(IamPort):
             raise NotAMember(user_id)
         project.grants[user_id] = self._checked(rights)
 
+    async def remove_member(self, user_id: str, project_id: str) -> None:
+        self._get_user(user_id)
+        project = self._get_project(project_id)
+        if project.owner_id == user_id:
+            raise OwnerRightsImmutable(user_id)
+        if user_id not in project.grants:
+            raise NotAMember(user_id)
+        del project.grants[user_id]
+
+    async def get_user(self, user_id: str) -> Identity:
+        return self._get_user(user_id).identity
+
     async def get_rights(self, user_id: str, project_id: str) -> frozenset[Right]:
         self._get_user(user_id)
         project = self._get_project(project_id)
@@ -145,9 +178,10 @@ class FakeIamClient(IamPort):
         del self._projects[project_id]
 
     async def find_user_id_by_email(self, email: str) -> str | None:
-        """Cherche un compte par email. None si personne n'a cette adresse."""
+        """Cherche un compte par email, sans tenir compte de la casse."""
+        needle = email.strip().lower()
         for record in self._users.values():
-            if record.identity.email == email:
+            if record.identity.email.strip().lower() == needle:
                 return record.identity.user_id
         return None
 

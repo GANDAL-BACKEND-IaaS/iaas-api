@@ -1,10 +1,10 @@
-"""Routes VM orientees ressource. Proprietaire : NAOMI.
+"""Routes VM orientees ressource.
 
-Le moteur partage POST /api/v1/requests traite deja le depot et la decision.
-Ces routes exposent le contrat que NAOMI implementera.
+Les creations et modifications passent par le moteur de demandes. La console est
+conservee dans le contrat ; son implementation technologique viendra plus tard.
 """
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Body, Depends, Query, status
 from sqlalchemy.orm import Session
 
 from app.application.ports.dns import DnsPort
@@ -16,18 +16,11 @@ from app.core.dependencies import get_dns, get_hypervisor, get_iam, get_network
 from app.core.errors import ErrorCode, error_responses
 from app.core.pagination import Page, PageParams, get_page_params
 from app.features.auth.dependencies import get_current_identity
-from app.features.requests.schemas import RequestOut
-from app.features.shares.schemas import ShareOut
+from app.features.requests.schemas import RequestOut, VMCreateRequestIn, VMUpdateRequestIn
 from app.features.vms import service
-from app.features.vms.schemas import (
-    ConfirmIn,
-    ConsoleOut,
-    PowerIn,
-    ShareTargetIn,
-    VmOut,
-    VmRequestCreateIn,
-    VmRequestUpdateIn,
-)
+from app.features.vms.schemas import ConsoleOut, PowerOut, VMOut, VMPowerIn
+from app.shared.deletion import DeletionIn, DeletionResponse
+from app.shared.enums import VmState
 
 router = APIRouter(prefix="/projects/{project_id}/vms", tags=["vms"])
 
@@ -37,7 +30,6 @@ _COMMON = (
     ErrorCode.NOT_FOUND,
     ErrorCode.VALIDATION_ERROR,
     ErrorCode.INVALID_STATE,
-    ErrorCode.NOT_IMPLEMENTED,
     ErrorCode.UPSTREAM_UNAVAILABLE,
 )
 
@@ -52,7 +44,7 @@ _COMMON = (
 )
 async def request_create_vm(
     project_id: str,
-    body: VmRequestCreateIn,
+    body: VMCreateRequestIn,
     identity: Identity = Depends(get_current_identity),
     iam: IamPort = Depends(get_iam),
     db: Session = Depends(get_db),
@@ -63,7 +55,7 @@ async def request_create_vm(
 
 @router.get(
     "",
-    response_model=Page[VmOut],
+    response_model=Page[VMOut],
     operation_id="list_vms",
     summary="Voir l'etat des VMs",
     responses=error_responses(*_COMMON),
@@ -74,14 +66,28 @@ async def list_vms(
     iam: IamPort = Depends(get_iam),
     db: Session = Depends(get_db),
     params: PageParams = Depends(get_page_params),
-) -> Page[VmOut]:
+    state: VmState | None = Query(default=None),
+    shared: bool | None = Query(default=None),
+    ip_address: str | None = Query(default=None, max_length=45),
+    name: str | None = Query(default=None, max_length=128),
+) -> Page[VMOut]:
     """F3 : liste les VMs du projet, y compris les VMs partagees."""
-    return await service.list_vms(db, iam, identity, project_id, params)
+    return await service.list_vms(
+        db,
+        iam,
+        identity,
+        project_id,
+        params,
+        state=state,
+        shared=shared,
+        ip_address=ip_address,
+        name=name,
+    )
 
 
 @router.get(
     "/{vm_id}",
-    response_model=VmOut,
+    response_model=VMOut,
     operation_id="get_vm",
     summary="Consulter une VM",
     responses=error_responses(*_COMMON),
@@ -92,7 +98,7 @@ async def get_vm(
     identity: Identity = Depends(get_current_identity),
     iam: IamPort = Depends(get_iam),
     db: Session = Depends(get_db),
-) -> VmOut:
+) -> VMOut:
     """F3 : consulte une VM visible dans le projet."""
     return await service.get_vm(db, iam, identity, project_id, vm_id)
 
@@ -103,23 +109,24 @@ async def get_vm(
     status_code=status.HTTP_202_ACCEPTED,
     operation_id="request_update_vm",
     summary="Demander la modification d'une VM",
-    responses=error_responses(*_COMMON),
+    responses=error_responses(*_COMMON, ErrorCode.CONFLICT),
 )
 async def request_update_vm(
     project_id: str,
     vm_id: str,
-    body: VmRequestUpdateIn,
+    body: VMUpdateRequestIn,
     identity: Identity = Depends(get_current_identity),
     iam: IamPort = Depends(get_iam),
     db: Session = Depends(get_db),
 ) -> RequestOut:
-    """F2 : depose une demande de modification des caracteristiques de base."""
+    """F2 : depose une demande de modification de la configuration complete."""
     return await service.request_update_vm(db, iam, identity, project_id, vm_id, body)
 
 
 @router.post(
     "/{vm_id}/power",
-    response_model=VmOut,
+    response_model=PowerOut,
+    status_code=status.HTTP_202_ACCEPTED,
     operation_id="power_vm",
     summary="Demarrer, arreter ou redemarrer une VM",
     responses=error_responses(*_COMMON),
@@ -127,14 +134,16 @@ async def request_update_vm(
 async def power_vm(
     project_id: str,
     vm_id: str,
-    body: PowerIn,
+    body: VMPowerIn,
     identity: Identity = Depends(get_current_identity),
     iam: IamPort = Depends(get_iam),
     hypervisor: HypervisorPort = Depends(get_hypervisor),
     db: Session = Depends(get_db),
-) -> VmOut:
+) -> PowerOut:
     """F4 : action directe, sans demande ni administrateur."""
-    return await service.power_vm(db, iam, hypervisor, identity, project_id, vm_id, body.action)
+    return await service.power_vm(
+        db, iam, hypervisor, identity, project_id, vm_id, body.action
+    )
 
 
 @router.post(
@@ -158,44 +167,32 @@ async def console_vm(
 
 @router.post(
     "/{vm_id}/deletion",
-    status_code=status.HTTP_204_NO_CONTENT,
+    response_model=DeletionResponse,
     operation_id="delete_vm",
     summary="Supprimer une VM",
-    description="Action directe. Exige une confirmation. Revoque les partages et demande la suppression DNS.",
-    responses=error_responses(*_COMMON),
+    description="Protocole en deux temps : apercu sans confirmation_text, puis texte exact.",
+    responses=error_responses(*_COMMON, ErrorCode.BAD_REQUEST),
 )
 async def delete_vm(
     project_id: str,
     vm_id: str,
-    body: ConfirmIn,
     identity: Identity = Depends(get_current_identity),
     iam: IamPort = Depends(get_iam),
     hypervisor: HypervisorPort = Depends(get_hypervisor),
     network: NetworkPort = Depends(get_network),
     dns: DnsPort = Depends(get_dns),
     db: Session = Depends(get_db),
-) -> None:
-    """F6 : supprime la VM apres confirmation explicite."""
-    await service.delete_vm(
-        db, iam, hypervisor, network, dns, identity, project_id, vm_id, body.confirm
+    body: DeletionIn = Body(default_factory=DeletionIn),
+):
+    """F6 : apercu puis suppression effective de la VM."""
+    return await service.delete_vm(
+        db,
+        iam,
+        hypervisor,
+        network,
+        dns,
+        identity,
+        project_id,
+        vm_id,
+        body.confirmation_text,
     )
-
-
-@router.post(
-    "/{vm_id}/shares",
-    response_model=ShareOut,
-    status_code=status.HTTP_201_CREATED,
-    operation_id="share_vm",
-    summary="Partager une VM",
-    responses=error_responses(*_COMMON, ErrorCode.CONFLICT),
-)
-async def share_vm(
-    project_id: str,
-    vm_id: str,
-    body: ShareTargetIn,
-    identity: Identity = Depends(get_current_identity),
-    iam: IamPort = Depends(get_iam),
-    db: Session = Depends(get_db),
-) -> ShareOut:
-    """F14 : partage la VM avec un autre projet du meme proprietaire."""
-    return await service.share_vm(db, iam, identity, project_id, vm_id, body.dest_project_id)

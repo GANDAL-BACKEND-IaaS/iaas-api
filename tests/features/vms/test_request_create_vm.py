@@ -1,9 +1,11 @@
 """Cas nominaux et limites de la demande de creation de VM (F1)."""
 
-from app.shared.models.packs import Pack
-from tests.support import login_header, own_project
+from tests.support import add_pack, login_header, own_project
 
-_CUSTOM = {"name": "web", "ram": 2048, "cpu": 2, "vram": 128, "ssd": 40}
+_CUSTOM = {
+    "name": "web",
+    "configuration": {"ram_gb": 2, "vcpu": 2, "vram_gb": 1, "ssd_gb": 40},
+}
 
 
 async def test_request_create_vm_is_pending(client, db, iam):
@@ -15,15 +17,13 @@ async def test_request_create_vm_is_pending(client, db, iam):
     body = response.json()
     assert body["status"] == "pending"
     assert body["kind"] == "vm_create"
-    assert body["payload"]["ram"] == 2048
+    assert body["payload"]["configuration"]["ram_gb"] == 2
 
 
 async def test_request_create_vm_rejects_pack_and_custom(client, db, iam):
     """Un pack et une configuration personnalisee ne se combinent pas."""
     await own_project(db, iam)
-    pack = Pack(name="Standard", ram=1, cpu=1, vram=1, ssd=1)
-    db.add(pack)
-    db.commit()
+    pack = add_pack(db, "Standard", ram_gb=1, vcpu=1, vram_gb=1, ssd_gb=1)
     headers = await login_header(iam)
     response = client.post(
         "/api/v1/projects/p1/vms",

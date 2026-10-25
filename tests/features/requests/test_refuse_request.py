@@ -9,7 +9,7 @@ from app.infrastructure.notifications.fake_notifications import FakeNotification
 from app.shared.enums import RequestKind, RequestStatus
 from tests.support import own_project, user_id
 
-_CUSTOM = {"name": "web", "ram": 2048, "cpu": 2, "vram": 128, "ssd": 40}
+_CUSTOM = {"name": "web", "configuration": {"ram_gb": 2, "vcpu": 2, "vram_gb": 1, "ssd_gb": 40}}
 
 
 async def test_admin_refuses_with_optional_note(db, iam):
@@ -17,7 +17,7 @@ async def test_admin_refuses_with_optional_note(db, iam):
     uid = await own_project(db, iam)
     row = await submit_request(
         db, iam, author_id=uid, project_id="p1", kind=RequestKind.STORAGE_CREATE,
-        payload={"name": "docs", "size": 10}, target_resource_id=None,
+        payload={"name": "docs", "size_gb": 10}, target_resource_id=None,
     )
     admin = await user_id(iam, "root@x.cm")
     notes = FakeNotifications()

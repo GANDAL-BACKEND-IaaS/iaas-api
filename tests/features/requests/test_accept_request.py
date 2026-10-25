@@ -20,7 +20,7 @@ from app.shared.models.requests import ResourceRequest
 from app.shared.models.vms import Vm
 from tests.support import own_project, user_id
 
-_CUSTOM = {"name": "web", "ram": 2048, "cpu": 2, "vram": 128, "ssd": 40}
+_CUSTOM = {"name": "web", "configuration": {"ram_gb": 2, "vcpu": 2, "vram_gb": 1, "ssd_gb": 40}}
 
 
 async def _pending(db, iam):
@@ -77,7 +77,7 @@ async def test_missing_handler_does_not_accept(db, iam):
                 db, actor_id=admin, actor_role=GlobalRole.ADMIN, request_id=row.id, note=None,
                 hypervisor=FakeHypervisor(), storage=FakeStorage(), notifications=FakeNotifications(),
             )
-        assert exc.value.code == ErrorCode.NOT_IMPLEMENTED
+        assert exc.value.code == ErrorCode.INTERNAL_ERROR
     finally:
         register_default_handlers()
     assert db.get(ResourceRequest, row.id).status == RequestStatus.PENDING.value

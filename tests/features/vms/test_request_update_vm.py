@@ -11,7 +11,7 @@ async def test_request_update_vm_is_pending(client, db, iam):
     response = client.post(
         "/api/v1/projects/p1/vms/vm-1/update-requests",
         headers=headers,
-        json={"ram": 4096},
+        json={"configuration": {"ram_gb": 4, "vcpu": 2, "vram_gb": 0, "ssd_gb": 40}},
     )
     assert response.status_code == 202
     body = response.json()
@@ -27,12 +27,15 @@ async def test_request_update_vm_unknown_is_not_found(client, db, iam):
     response = client.post(
         "/api/v1/projects/p1/vms/missing/update-requests",
         headers=headers,
-        json={"ram": 2},
+        json={"configuration": {"ram_gb": 2, "vcpu": 1, "vram_gb": 0, "ssd_gb": 10}},
     )
     assert response.status_code == 404
 
 
 def test_request_update_vm_requires_a_token(client):
     """Sans jeton, la route est refusee."""
-    response = client.post("/api/v1/projects/p1/vms/vm-1/update-requests", json={"ram": 2})
+    response = client.post(
+        "/api/v1/projects/p1/vms/vm-1/update-requests",
+        json={"configuration": {"ram_gb": 2, "vcpu": 1, "vram_gb": 0, "ssd_gb": 10}},
+    )
     assert response.status_code == 401

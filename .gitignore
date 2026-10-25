@@ -37,3 +37,5 @@ docker-compose.override.yml
 .vscode/
 .DS_Store
 Thumbs.db
+
+graphify-out/

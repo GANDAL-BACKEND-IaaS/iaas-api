@@ -1,18 +1,22 @@
-"""Format d'erreur homogene de l'API (exigence non fonctionnelle : API documentee).
+"""Format d'erreur homogene de l'API.
 
 Toute reponse d'erreur a la forme :
-{"error": {"code": "<code stable>", "message": "<message lisible>", "details": ...}}
+
+    {"error": {"code": "<code stable>", "message": "<message lisible>", "details": null}}
 
 Le catalogue ErrorCode est le contrat que les integrateurs peuvent coder en dur.
+Les erreurs de routage (404, 405) et de validation (422) passent par le meme
+enveloppe : aucun `{"detail": ...}` FastAPI ne doit fuiter.
 """
 
 import logging
 from enum import StrEnum
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 
 class ErrorCode(StrEnum):
@@ -26,7 +30,6 @@ class ErrorCode(StrEnum):
     BAD_REQUEST = "bad_request"
     INVALID_STATE = "invalid_state"
     UPSTREAM_UNAVAILABLE = "upstream_unavailable"
-    NOT_IMPLEMENTED = "not_implemented"
     INTERNAL_ERROR = "internal_error"
 
 
@@ -40,7 +43,6 @@ STATUS_FOR: dict[ErrorCode, int] = {
     ErrorCode.BAD_REQUEST: 400,
     ErrorCode.INVALID_STATE: 409,
     ErrorCode.UPSTREAM_UNAVAILABLE: 503,
-    ErrorCode.NOT_IMPLEMENTED: 501,
     ErrorCode.INTERNAL_ERROR: 500,
 }
 
@@ -49,9 +51,10 @@ _CODE_FOR_STATUS: dict[int, ErrorCode] = {
     401: ErrorCode.UNAUTHORIZED,
     403: ErrorCode.FORBIDDEN,
     404: ErrorCode.NOT_FOUND,
+    405: ErrorCode.NOT_FOUND,
     409: ErrorCode.CONFLICT,
     422: ErrorCode.VALIDATION_ERROR,
-    501: ErrorCode.NOT_IMPLEMENTED,
+    500: ErrorCode.INTERNAL_ERROR,
     503: ErrorCode.UPSTREAM_UNAVAILABLE,
 }
 
@@ -66,7 +69,6 @@ _MESSAGES: dict[ErrorCode, str] = {
     ErrorCode.BAD_REQUEST: "Requete invalide.",
     ErrorCode.INVALID_STATE: "Operation incompatible avec l'etat actuel.",
     ErrorCode.UPSTREAM_UNAVAILABLE: "Un groupe externe est indisponible. Rien n'a ete applique.",
-    ErrorCode.NOT_IMPLEMENTED: "Fonctionnalite reservee, pas encore implementee.",
     ErrorCode.INTERNAL_ERROR: "Erreur interne.",
 }
 
@@ -89,19 +91,8 @@ class AppError(Exception):
 
 
 def error_payload(code: ErrorCode, message: str, details: Any = None) -> dict[str, Any]:
-    """Construit le corps JSON d'une erreur. Omet details s'il est absent."""
-    error: dict[str, Any] = {"code": code.value, "message": message}
-    if details is not None:
-        error["details"] = details
-    return {"error": error}
-
-
-def not_implemented(owner: str, subject: str) -> AppError:
-    """Signale une route dont l'implementation est reservee a un developpeur."""
-    return AppError(
-        ErrorCode.NOT_IMPLEMENTED,
-        f"Implementation reservee a {owner} : {subject}.",
-    )
+    """Construit le corps JSON d'une erreur. `details` est toujours present."""
+    return {"error": {"code": code.value, "message": message, "details": details}}
 
 
 def upstream_unavailable(group: str) -> AppError:
@@ -110,6 +101,33 @@ def upstream_unavailable(group: str) -> AppError:
         ErrorCode.UPSTREAM_UNAVAILABLE,
         f"Le groupe {group} est indisponible. Aucune modification n'a ete appliquee.",
     )
+
+
+def _validation_details(exc: RequestValidationError) -> list[dict[str, Any]]:
+    """Normalise les erreurs Pydantic en une liste lisible {field, message, ...}."""
+    details: list[dict[str, Any]] = []
+    for error in exc.errors():
+        location = [str(part) for part in error.get("loc", ()) if part not in ("body", "query", "path")]
+        item: dict[str, Any] = {
+            "field": ".".join(location) or "body",
+            "message": str(error.get("msg", "")),
+            "type": str(error.get("type", "")),
+        }
+        context = error.get("ctx") or {}
+        if "ge" in context:
+            item["minimum"] = context["ge"]
+        if "gt" in context:
+            item["minimum_exclusive"] = context["gt"]
+        if "le" in context:
+            item["maximum"] = context["le"]
+        if "lt" in context:
+            item["maximum_exclusive"] = context["lt"]
+        if "min_length" in context:
+            item["min_length"] = context["min_length"]
+        if "max_length" in context:
+            item["max_length"] = context["max_length"]
+        details.append(item)
+    return details
 
 
 def error_responses(*codes: ErrorCode) -> dict[int, dict[str, Any]]:
@@ -129,7 +147,7 @@ def error_responses(*codes: ErrorCode) -> dict[int, dict[str, Any]]:
                             "properties": {
                                 "error": {
                                     "type": "object",
-                                    "required": ["code", "message"],
+                                    "required": ["code", "message", "details"],
                                     "properties": {
                                         "code": {"type": "string"},
                                         "message": {"type": "string"},
@@ -160,10 +178,17 @@ def register_exception_handlers(app: FastAPI) -> None:
             content=error_payload(exc.code, exc.message, exc.details),
         )
 
-    @app.exception_handler(HTTPException)
-    async def _http_error(_: Request, exc: HTTPException) -> JSONResponse:
+    @app.exception_handler(StarletteHTTPException)
+    async def _http_error(_: Request, exc: StarletteHTTPException) -> JSONResponse:
         code = _CODE_FOR_STATUS.get(exc.status_code, ErrorCode.INTERNAL_ERROR)
-        message = exc.detail if isinstance(exc.detail, str) else _MESSAGES[code]
+        if exc.status_code in (404, 405):
+            message = (
+                "Ressource introuvable."
+                if exc.status_code == 404
+                else "Methode non autorisee pour cette ressource."
+            )
+        else:
+            message = exc.detail if isinstance(exc.detail, str) else _MESSAGES[code]
         return JSONResponse(
             status_code=exc.status_code,
             content=error_payload(code, message),
@@ -177,7 +202,7 @@ def register_exception_handlers(app: FastAPI) -> None:
             content=error_payload(
                 ErrorCode.VALIDATION_ERROR,
                 _MESSAGES[ErrorCode.VALIDATION_ERROR],
-                details=exc.errors(),
+                details=_validation_details(exc),
             ),
         )
 

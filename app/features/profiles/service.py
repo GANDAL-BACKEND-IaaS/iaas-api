@@ -16,7 +16,7 @@ class UnknownRights(ProfileError): ...
 def _rights(db: Session, codes: Collection[str]) -> list[RightModel]:
     codes = set(codes)
     found = list(db.scalars(select(RightModel).where(RightModel.code.in_(codes))))
-    missing = codes - {r.code for r in found}
+    missing = codes - {right.code for right in found}
     if missing:
         raise UnknownRights(", ".join(sorted(missing)))
     return found
@@ -30,7 +30,7 @@ def list_profiles(db: Session) -> list[ProfileModel]:
     return list(db.scalars(select(ProfileModel).order_by(ProfileModel.name)))
 
 
-def get_profile(db: Session, profile_id: int) -> ProfileModel:
+def get_profile(db: Session, profile_id: str) -> ProfileModel:
     profile = db.get(ProfileModel, profile_id)
     if profile is None:
         raise ProfileNotFound(str(profile_id))
@@ -43,9 +43,13 @@ def create_profile(db: Session, name: str, description: str, right_codes: Collec
     return _commit(db, profile, name)
 
 
-def update_profile(db: Session, profile_id: int, name: str | None = None,
-                   description: str | None = None,
-                   right_codes: Collection[str] | None = None) -> ProfileModel:
+def update_profile(
+    db: Session,
+    profile_id: str,
+    name: str | None = None,
+    description: str | None = None,
+    right_codes: Collection[str] | None = None,
+) -> ProfileModel:
     profile = get_profile(db, profile_id)
     if name is not None:
         profile.name = name
@@ -56,18 +60,19 @@ def update_profile(db: Session, profile_id: int, name: str | None = None,
     return _commit(db, profile, profile.name)
 
 
-def delete_profile(db: Session, profile_id: int) -> None:
+def delete_profile(db: Session, profile_id: str) -> None:
     db.delete(get_profile(db, profile_id))
     db.commit()
 
 
-def resolve_rights(db: Session, profile_id: int | None, extra: Collection[str] = ()) -> frozenset[str]:
-    """Droits effectifs d'une invitation : droits du profil + droits à la carte.
-    Utilisé par la future fonctionnalité F13 avant d'appeler iam.invite_user."""
-    codes = set(extra)
+def resolve_rights(
+    db: Session, profile_id: str | None, additional: Collection[str] = ()
+) -> frozenset[str]:
+    """Droits effectifs d'un membre : droits du profil + droits additionnels."""
+    codes = set(additional or ())
     if profile_id is not None:
-        codes |= {r.code for r in get_profile(db, profile_id).rights}
-    _rights(db, codes)  # vérifie que tous les droits existent
+        codes |= {right.code for right in get_profile(db, profile_id).rights}
+    _rights(db, codes)  # verifie que tous les droits existent
     return frozenset(codes)
 
 
@@ -77,4 +82,5 @@ def _commit(db: Session, profile: ProfileModel, name: str) -> ProfileModel:
     except IntegrityError:
         db.rollback()
         raise ProfileNameTaken(name) from None
+    db.refresh(profile)
     return profile

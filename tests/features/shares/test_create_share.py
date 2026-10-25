@@ -22,7 +22,7 @@ async def test_owner_shares_vm_immediately(db, iam):
     uid = await _two_projects(db, iam)
     add_vm(db, "p1")
     row = await create_share(
-        db, iam, user_id=uid, resource_type=ResourceType.VM,
+        db, iam, user_id=uid, resource_type=ResourceType.VM, project_id="p1",
         resource_id="vm-1", dest_project_id="p2",
     )
     assert row.status == ShareStatus.ACTIVE.value
@@ -39,7 +39,7 @@ async def test_different_owners_are_forbidden(db, iam):
     add_vm(db, "p1")
     with pytest.raises(AppError) as exc:
         await create_share(
-            db, iam, user_id=uid, resource_type=ResourceType.VM,
+            db, iam, user_id=uid, resource_type=ResourceType.VM, project_id="p1",
             resource_id="vm-1", dest_project_id="p2",
         )
     assert exc.value.code == ErrorCode.FORBIDDEN
@@ -51,7 +51,7 @@ async def test_same_project_is_conflict(db, iam):
     add_storage(db, "p1")
     with pytest.raises(AppError) as exc:
         await create_share(
-            db, iam, user_id=uid, resource_type=ResourceType.STORAGE,
+            db, iam, user_id=uid, resource_type=ResourceType.STORAGE, project_id="p1",
             resource_id="st-1", dest_project_id="p1",
         )
     assert exc.value.code == ErrorCode.CONFLICT
@@ -65,14 +65,14 @@ async def test_guest_must_have_share_right_and_dest_membership(db, iam):
     await iam.invite_user(guest.user_id, "p1", ["vm.view"])
     with pytest.raises(AppError) as exc:
         await create_share(
-            db, iam, user_id=guest.user_id, resource_type=ResourceType.VM,
+            db, iam, user_id=guest.user_id, resource_type=ResourceType.VM, project_id="p1",
             resource_id="vm-1", dest_project_id="p2",
         )
     assert exc.value.code == ErrorCode.FORBIDDEN
     await iam.invite_user(guest.user_id, "p2", ["vm.view"])
     await iam.update_rights(guest.user_id, "p1", ["vm.share"])
     row = await create_share(
-        db, iam, user_id=guest.user_id, resource_type=ResourceType.VM,
+        db, iam, user_id=guest.user_id, resource_type=ResourceType.VM, project_id="p1",
         resource_id="vm-1", dest_project_id="p2",
     )
     assert row.created_by == guest.user_id
@@ -84,12 +84,12 @@ async def test_duplicate_active_share_conflicts(db, iam):
     uid = await _two_projects(db, iam)
     add_vm(db, "p1")
     await create_share(
-        db, iam, user_id=uid, resource_type=ResourceType.VM,
+        db, iam, user_id=uid, resource_type=ResourceType.VM, project_id="p1",
         resource_id="vm-1", dest_project_id="p2",
     )
     with pytest.raises(AppError) as exc:
         await create_share(
-            db, iam, user_id=uid, resource_type=ResourceType.VM,
+            db, iam, user_id=uid, resource_type=ResourceType.VM, project_id="p1",
             resource_id="vm-1", dest_project_id="p2",
         )
     assert exc.value.code == ErrorCode.CONFLICT
@@ -101,7 +101,7 @@ async def test_deleting_resource_cannot_be_shared(db, iam):
     add_vm(db, "p1", state="deleting")
     with pytest.raises(AppError) as exc:
         await create_share(
-            db, iam, user_id=uid, resource_type=ResourceType.VM,
+            db, iam, user_id=uid, resource_type=ResourceType.VM, project_id="p1",
             resource_id="vm-1", dest_project_id="p2",
         )
     assert exc.value.code == ErrorCode.INVALID_STATE

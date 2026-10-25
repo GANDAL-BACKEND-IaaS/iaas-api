@@ -1,10 +1,10 @@
-"""Routes du moteur de demandes, versionnees par le routeur /api/v1.
+"""Routes du moteur de demandes.
 
 F15 : l'auteur annule une demande en attente.
 F16 : l'administrateur accepte ou refuse, sans modifier la demande.
 """
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.application.ports.hypervisor import HypervisorPort
@@ -17,22 +17,20 @@ from app.core.errors import ErrorCode, error_responses
 from app.core.pagination import Page, PageParams, get_page_params
 from app.features.auth.dependencies import get_current_identity, require_admin
 from app.features.requests import service
-from app.features.requests.schemas import RequestCreateIn, RequestDecisionIn, RequestOut
+from app.features.requests.schemas import RequestDecisionIn, RequestOut
 from app.features.requests.service import register_default_handlers
-from app.shared.enums import RequestStatus
+from app.shared.enums import RequestKind, RequestStatus
 
 register_default_handlers()
 
 router = APIRouter(prefix="/requests", tags=["demandes"])
 
 _AUTH = (ErrorCode.UNAUTHORIZED,)
-_READ = (ErrorCode.UNAUTHORIZED, ErrorCode.FORBIDDEN, ErrorCode.NOT_FOUND, ErrorCode.VALIDATION_ERROR)
-_SUBMIT = (
+_READ = (
     ErrorCode.UNAUTHORIZED,
     ErrorCode.FORBIDDEN,
     ErrorCode.NOT_FOUND,
     ErrorCode.VALIDATION_ERROR,
-    ErrorCode.INVALID_STATE,
 )
 _CANCEL = (ErrorCode.UNAUTHORIZED, ErrorCode.FORBIDDEN, ErrorCode.NOT_FOUND, ErrorCode.INVALID_STATE)
 _DECIDE = (
@@ -40,38 +38,9 @@ _DECIDE = (
     ErrorCode.FORBIDDEN,
     ErrorCode.NOT_FOUND,
     ErrorCode.INVALID_STATE,
-    ErrorCode.NOT_IMPLEMENTED,
     ErrorCode.UPSTREAM_UNAVAILABLE,
     ErrorCode.VALIDATION_ERROR,
 )
-
-
-@router.post(
-    "",
-    response_model=RequestOut,
-    status_code=status.HTTP_201_CREATED,
-    operation_id="submit_request",
-    summary="Deposer une demande",
-    description="Cree une demande en attente, liee a un projet. Un administrateur devra la traiter.",
-    responses=error_responses(*_SUBMIT),
-)
-async def submit_request(
-    body: RequestCreateIn,
-    identity: Identity = Depends(get_current_identity),
-    iam: IamPort = Depends(get_iam),
-    db: Session = Depends(get_db),
-) -> RequestOut:
-    """Depose une demande de creation ou de modification (R1, R2, R13)."""
-    row = await service.submit_request(
-        db,
-        iam,
-        author_id=identity.user_id,
-        project_id=body.project_id,
-        kind=body.kind,
-        payload=body.payload,
-        target_resource_id=body.target_resource_id,
-    )
-    return RequestOut.model_validate(row)
 
 
 @router.get(
@@ -79,28 +48,31 @@ async def submit_request(
     response_model=Page[RequestOut],
     operation_id="list_requests",
     summary="Lister les demandes",
-    responses=error_responses(*_AUTH, ErrorCode.VALIDATION_ERROR),
+    responses=error_responses(*_READ),
 )
-def list_requests(
+async def list_requests(
     identity: Identity = Depends(get_current_identity),
+    iam: IamPort = Depends(get_iam),
     db: Session = Depends(get_db),
     params: PageParams = Depends(get_page_params),
     request_status: RequestStatus | None = Query(default=None, alias="status"),
+    kind: RequestKind | None = Query(default=None),
+    project_id: str | None = Query(default=None),
+    author_id: str | None = Query(default=None),
 ) -> Page[RequestOut]:
-    """Liste paginee des demandes de l'appelant, ou de toutes les demandes pour un admin."""
-    rows, total = service.list_requests(
+    """Liste paginee des demandes visibles par l'appelant."""
+    rows, total = await service.list_requests(
         db,
+        iam,
         actor_id=identity.user_id,
         actor_role=identity.role,
         params=params,
         status=request_status,
+        kind=kind,
+        project_id=project_id,
+        author_id=author_id,
     )
-    return Page[RequestOut](
-        items=[RequestOut.model_validate(row) for row in rows],
-        total=total,
-        page=params.page,
-        page_size=params.page_size,
-    )
+    return Page.build([RequestOut.model_validate(row) for row in rows], total, params)
 
 
 @router.get(
@@ -110,14 +82,15 @@ def list_requests(
     summary="Consulter une demande",
     responses=error_responses(*_READ),
 )
-def get_request(
-    request_id: int,
+async def get_request(
+    request_id: str,
     identity: Identity = Depends(get_current_identity),
+    iam: IamPort = Depends(get_iam),
     db: Session = Depends(get_db),
 ) -> RequestOut:
     """Retourne une demande accessible a l'appelant."""
-    row = service.get_request(
-        db, actor_id=identity.user_id, actor_role=identity.role, request_id=request_id
+    row = await service.get_request(
+        db, iam, actor_id=identity.user_id, actor_role=identity.role, request_id=request_id
     )
     return RequestOut.model_validate(row)
 
@@ -131,7 +104,7 @@ def get_request(
     responses=error_responses(*_CANCEL),
 )
 def cancel_request(
-    request_id: int,
+    request_id: str,
     identity: Identity = Depends(get_current_identity),
     db: Session = Depends(get_db),
 ) -> RequestOut:
@@ -149,7 +122,7 @@ def cancel_request(
     responses=error_responses(*_DECIDE),
 )
 async def accept_request(
-    request_id: int,
+    request_id: str,
     body: RequestDecisionIn,
     identity: Identity = Depends(require_admin),
     db: Session = Depends(get_db),
@@ -180,7 +153,7 @@ async def accept_request(
     responses=error_responses(*_DECIDE),
 )
 async def refuse_request(
-    request_id: int,
+    request_id: str,
     body: RequestDecisionIn,
     identity: Identity = Depends(require_admin),
     db: Session = Depends(get_db),

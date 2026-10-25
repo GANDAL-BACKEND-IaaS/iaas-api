@@ -18,7 +18,7 @@ from app.core.settings import get_settings
 from app.core.tokens import decode_token
 from app.infrastructure.dns.fake_dns import FakeDns
 from app.infrastructure.hypervisor.fake_hypervisor import FakeHypervisor
-from app.infrastructure.iam.fake_iam import FakeIamClient
+from app.infrastructure.iam.fake_iam import FakeIamClient, stable_user_id
 from app.infrastructure.network.fake_network import FakeNetwork
 from app.infrastructure.notifications.fake_notifications import FakeNotifications
 from app.infrastructure.storage.fake_storage import FakeStorage
@@ -42,9 +42,18 @@ def get_iam() -> IamPort:
         known_rights=load_rights_catalog().right_codes,
     )
     if settings.iam_seed_demo_users:
-        client.add_user("admin@iaas.cm", "admin123", "Admin", "Root", GlobalRole.ADMIN)
-        client.add_user("alice@iaas.cm", "alice123", "Alice", "Ngono")
-        client.add_user("bob@iaas.cm", "bob123", "Bob", "Mbarga")
+        client.add_user(
+            "admin@iaas.cm", "admin123", "Admin", "Root", GlobalRole.ADMIN,
+            user_id=stable_user_id("admin@iaas.cm"),
+        )
+        client.add_user(
+            "alice@iaas.cm", "alice123", "Alice", "Ngono",
+            user_id=stable_user_id("alice@iaas.cm"),
+        )
+        client.add_user(
+            "bob@iaas.cm", "bob123", "Bob", "Mbarga",
+            user_id=stable_user_id("bob@iaas.cm"),
+        )
     return client
 
 

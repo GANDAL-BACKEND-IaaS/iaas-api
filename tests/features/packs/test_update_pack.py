@@ -2,17 +2,14 @@
 
 from app.features.requests.service import submit_request
 from app.shared.enums import RequestKind
-from app.shared.models.packs import Pack
 from app.shared.models.requests import ResourceRequest
-from tests.support import login_header, own_project
+from tests.support import add_pack, login_header, own_project
 
 
 async def test_update_pack_refreshes_pending_request(client, db, iam):
     """Modifier un pack met a jour la demande de creation encore en attente."""
     uid = await own_project(db, iam)
-    pack = Pack(name="Standard", ram=1024, cpu=1, vram=1, ssd=1)
-    db.add(pack)
-    db.commit()
+    pack = add_pack(db, "Standard", ram_gb=1, vcpu=1, vram_gb=1, ssd_gb=1)
     await submit_request(
         db,
         iam,
@@ -24,18 +21,18 @@ async def test_update_pack_refreshes_pending_request(client, db, iam):
     )
     headers = await login_header(iam, "root@x.cm")
     response = client.patch(
-        f"/api/v1/admin/packs/{pack.id}", headers=headers, json={"ram": 8192}
+        f"/api/v1/admin/packs/{pack.id}", headers=headers, json={"ram_gb": 8}
     )
     assert response.status_code == 200
     stored = db.query(ResourceRequest).one()
-    assert stored.payload["ram"] == 8192
+    assert stored.payload["ram_gb"] == 8
     assert stored.status == "pending"
 
 
 async def test_update_pack_unknown(client, iam):
     """Un pack absent est introuvable."""
     headers = await login_header(iam, "root@x.cm")
-    response = client.patch("/api/v1/admin/packs/999", headers=headers, json={"ram": 2})
+    response = client.patch("/api/v1/admin/packs/999", headers=headers, json={"ram_gb": 2})
     assert response.status_code == 404
 
 

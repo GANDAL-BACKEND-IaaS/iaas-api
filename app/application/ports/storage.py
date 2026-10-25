@@ -1,6 +1,6 @@
 """Port Stockage.
 
-Contrat a convenir avec le groupe Stockage : creation, modification de la taille, suppression.
+Contrat a convenir avec le groupe Stockage : creation, redimensionnement, suppression.
 Les appels sont rejouables sans effet de bord et bornes par un delai maximal.
 """
 
@@ -18,17 +18,18 @@ class StorageUnavailable(StorageError):
 
 @dataclass(frozen=True)
 class StorageSpec:
-    """Nom et taille demandes au groupe Stockage."""
+    """Nom et taille (Go) demandes au groupe Stockage."""
 
     name: str
-    size: int
+    size_gb: int
 
 
 @dataclass(frozen=True)
 class StorageRef:
-    """Identifiant d'un espace cote groupe Stockage."""
+    """Identifiant d'un espace cote groupe Stockage, avec l'adresse IP si disponible."""
 
     storage_id: str
+    ip_address: str | None = None
 
 
 class StoragePort(ABC):
@@ -39,7 +40,7 @@ class StoragePort(ABC):
         """Cree un espace de stockage."""
 
     @abstractmethod
-    async def resize(self, ref: StorageRef, size: int) -> None:
+    async def resize(self, ref: StorageRef, size_gb: int) -> None:
         """Modifie la taille d'un espace existant."""
 
     @abstractmethod

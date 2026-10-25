@@ -54,6 +54,12 @@ async def test_login_errors(iam, alice):
         await iam.login("inconnu@x.cm", "pw1")
 
 
+async def test_find_user_id_by_email_ignores_case_and_spaces(iam, alice):
+    """Le lookup email est utilisable tel que saisi par le frontend."""
+    assert await iam.find_user_id_by_email("  ALICE@X.CM  ") == alice.user_id
+    assert await iam.find_user_id_by_email("inconnu@x.cm") is None
+
+
 @pytest.mark.parametrize("garbage", ["", "abc", "a.b.c", "Bearer xyz"])
 async def test_validate_rejects_garbage(iam, garbage):
     with pytest.raises(InvalidToken):

@@ -10,7 +10,7 @@ async def test_request_create_storage_is_pending(client, iam):
     response = client.post(
         f"/api/v1/projects/{project['id']}/storages",
         headers=headers,
-        json={"name": "docs", "size": 10},
+        json={"name": "docs", "size_gb": 10},
     )
     assert response.status_code == 201
     assert response.json()["kind"] == "storage_create"
@@ -19,5 +19,5 @@ async def test_request_create_storage_is_pending(client, iam):
 
 def test_request_create_storage_requires_a_token(client):
     """Sans jeton, la route est refusee."""
-    response = client.post("/api/v1/projects/p1/storages", json={"name": "docs", "size": 10})
+    response = client.post("/api/v1/projects/p1/storages", json={"name": "docs", "size_gb": 10})
     assert response.status_code == 401

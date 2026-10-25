@@ -31,7 +31,7 @@ async def test_list_vms_includes_shared(client, db, iam):
     items = {item["id"]: item for item in response.json()["items"]}
     assert items["vm-1"]["shared"] is True
     assert items["vm-2"]["shared"] is False
-    assert response.json()["total"] == 2
+    assert response.json()["total_items"] == 2
 
 
 async def test_list_vms_forbidden_without_right(client, db, iam):

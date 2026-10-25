@@ -27,6 +27,13 @@ class FakeNetwork(NetworkPort):
         self.project_of[network_id] = project_id
         return NetworkRef(network_id)
 
+    async def rename_network(self, network: NetworkRef, name: str) -> None:
+        """Renomme un reseau existant."""
+        self._guard()
+        if network.network_id not in self.networks:
+            raise KeyError(network.network_id)
+        self.networks[network.network_id] = name
+
     async def attach_vm(self, network: NetworkRef, vm: VmRef) -> None:
         """Rattache une VM. Sans effet si le lien existe deja."""
         self._guard()

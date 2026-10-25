@@ -5,7 +5,7 @@ from tests.support import add_vm, login_header, own_project
 
 
 def _register(hypervisor, vm_id="vm-1"):
-    hypervisor.vms[vm_id] = VmSpec("web", 2048, 2, 128, 40)
+    hypervisor.vms[vm_id] = VmSpec("web", 2, 2, 1, 40)
 
 
 async def test_power_vm_starts_when_stopped(client, db, iam, hypervisor):
@@ -17,8 +17,8 @@ async def test_power_vm_starts_when_stopped(client, db, iam, hypervisor):
     response = client.post(
         "/api/v1/projects/p1/vms/vm-1/power", headers=headers, json={"action": "start"}
     )
-    assert response.status_code == 200
-    assert response.json()["state"] == "running"
+    assert response.status_code == 202
+    assert response.json()["state"] == "starting"
     assert hypervisor.power_log[0][0] == "vm-1"
     assert hypervisor.power_log[0][1].value == "start"
 

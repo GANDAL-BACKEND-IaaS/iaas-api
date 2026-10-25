@@ -10,7 +10,7 @@ async def test_list_storages(client, db, iam):
     add_storage(db, project["id"], "st-1")
     response = client.get(f"/api/v1/projects/{project['id']}/storages", headers=headers)
     assert response.status_code == 200
-    assert response.json()["total"] == 1
+    assert response.json()["total_items"] == 1
     assert response.json()["items"][0]["shared"] is False
 
 

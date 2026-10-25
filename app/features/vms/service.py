@@ -1,4 +1,4 @@
-"""Services VM. Proprietaire : NAOMI (port VM).
+"""Services VM.
 
 Les creations et modifications passent par le moteur de demandes.
 Les actions directes appellent les ports et ne sont jamais appliquees a moitie.
@@ -14,27 +14,42 @@ from app.application.ports.network import NetworkPort, NetworkUnavailable
 from app.core.audit import record_audit
 from app.core.errors import AppError, ErrorCode, upstream_unavailable
 from app.core.pagination import Page, PageParams, paginate
-from app.features.requests.schemas import RequestOut
+from app.features.requests.schemas import RequestOut, VMCreateRequestIn, VMUpdateRequestIn
 from app.features.requests.service import submit_request
-from app.features.shares.schemas import ShareOut
-from app.features.shares.service import create_share, revoke_all_for_resource, visible_in_project
-from app.features.vms.schemas import (
-    ConsoleOut,
-    VmOut,
-    VmRequestCreateIn,
-    VmRequestUpdateIn,
+from app.features.shares.service import revoke_all_for_resource, visible_in_project
+from app.features.vms.schemas import ConsoleOut, PowerOut, VMOut
+from app.shared.deletion import (
+    DeletionOut,
+    DeletionPreviewOut,
+    expected_text,
+    is_confirmed,
 )
-from app.shared.enums import PowerAction, RequestKind, ResourceType, VmState
+from app.shared.enums import (
+    POWER_ALLOWED,
+    POWER_TARGET,
+    PowerAction,
+    RequestKind,
+    ResourceType,
+    VmState,
+)
 from app.shared.models.networks import Network, NetworkVm
+from app.shared.models.projects import Project
 from app.shared.models.shares import ResourceShare
 from app.shared.models.vms import Vm
 from app.shared.policies.access import ResourceView, authorize
 
 
-def _out(vm: Vm, project_id: str) -> VmOut:
+def _out(vm: Vm, project_id: str) -> VMOut:
     """Projette une VM en ajoutant le drapeau shared pour le projet consulte."""
-    item = VmOut.model_validate(vm)
+    item = VMOut.model_validate(vm)
     return item.model_copy(update={"shared": vm.origin_project_id != project_id})
+
+
+def _project(db: Session, project_id: str) -> Project:
+    project = db.get(Project, project_id)
+    if project is None:
+        raise AppError(ErrorCode.NOT_FOUND, "Projet introuvable.")
+    return project
 
 
 def _load(db: Session, vm_id: str) -> Vm:
@@ -60,7 +75,7 @@ async def request_create_vm(
     iam: IamPort,
     identity: Identity,
     project_id: str,
-    body: VmRequestCreateIn,
+    body: VMCreateRequestIn,
 ) -> RequestOut:
     """F1 : depose une demande de creation. La VM n'existe qu'apres acceptation."""
     row = await submit_request(
@@ -81,9 +96,9 @@ async def request_update_vm(
     identity: Identity,
     project_id: str,
     vm_id: str,
-    body: VmRequestUpdateIn,
+    body: VMUpdateRequestIn,
 ) -> RequestOut:
-    """F2 : depose une demande de modification des caracteristiques de base."""
+    """F2 : depose une demande de modification de la configuration complete."""
     row = await submit_request(
         db,
         iam,
@@ -102,8 +117,14 @@ async def list_vms(
     identity: Identity,
     project_id: str,
     params: PageParams,
-) -> Page[VmOut]:
+    *,
+    state: VmState | None = None,
+    shared: bool | None = None,
+    ip_address: str | None = None,
+    name: str | None = None,
+) -> Page[VMOut]:
     """F3 : liste les VMs du projet, y compris celles qui y sont partagees."""
+    _project(db, project_id)
     await authorize(
         iam=iam,
         db=db,
@@ -116,18 +137,22 @@ async def list_vms(
         ResourceShare.dest_project_id == project_id,
         ResourceShare.status == "active",
     )
-    statement = (
-        select(Vm)
-        .where(or_(Vm.origin_project_id == project_id, Vm.id.in_(shared_ids)))
-        .order_by(Vm.created_at.desc())
-    )
-    rows, total = paginate(db, statement, params)
-    return Page[VmOut](
-        items=[_out(vm, project_id) for vm in rows],
-        total=total,
-        page=params.page,
-        page_size=params.page_size,
-    )
+    if shared is True:
+        statement = select(Vm).where(Vm.id.in_(shared_ids))
+    elif shared is False:
+        statement = select(Vm).where(Vm.origin_project_id == project_id)
+    else:
+        statement = select(Vm).where(
+            or_(Vm.origin_project_id == project_id, Vm.id.in_(shared_ids))
+        )
+    if state is not None:
+        statement = statement.where(Vm.state == state.value)
+    if ip_address is not None:
+        statement = statement.where(Vm.ip_address == ip_address)
+    if name:
+        statement = statement.where(Vm.name.ilike(f"{name}%"))
+    rows, total = paginate(db, statement.order_by(Vm.name, Vm.id), params)
+    return Page.build([_out(vm, project_id) for vm in rows], total, params)
 
 
 async def get_vm(
@@ -136,8 +161,9 @@ async def get_vm(
     identity: Identity,
     project_id: str,
     vm_id: str,
-) -> VmOut:
+) -> VMOut:
     """F3 : consulte une VM visible dans le projet."""
+    _project(db, project_id)
     vm = _load(db, vm_id)
     _visible_or_404(db, vm, project_id)
     await authorize(
@@ -151,16 +177,6 @@ async def get_vm(
     return _out(vm, project_id)
 
 
-def _next_state(vm: Vm, action: PowerAction) -> str:
-    if action == PowerAction.START and vm.state == VmState.STOPPED.value:
-        return VmState.RUNNING.value
-    if action == PowerAction.STOP and vm.state == VmState.RUNNING.value:
-        return VmState.STOPPED.value
-    if action == PowerAction.RESTART and vm.state == VmState.RUNNING.value:
-        return VmState.RUNNING.value
-    raise AppError(ErrorCode.INVALID_STATE, "Action incompatible avec l'etat de la VM.")
-
-
 async def power_vm(
     db: Session,
     iam: IamPort,
@@ -169,8 +185,9 @@ async def power_vm(
     project_id: str,
     vm_id: str,
     action: PowerAction,
-) -> VmOut:
+) -> PowerOut:
     """F4 : demarre, arrete ou redemarre une VM, sans demande."""
+    _project(db, project_id)
     vm = _load(db, vm_id)
     _visible_or_404(db, vm, project_id)
     await authorize(
@@ -181,13 +198,15 @@ async def power_vm(
         required_right="vm.power",
         resource=ResourceView(ResourceType.VM.value, vm.id, vm.origin_project_id),
     )
-    new_state = _next_state(vm, action)
+    if VmState(vm.state) not in POWER_ALLOWED[action]:
+        raise AppError(ErrorCode.INVALID_STATE, "Action incompatible avec l'etat de la VM.")
+    target, transient = POWER_TARGET[action]
     try:
         await hypervisor.power(VmRef(vm.id), action)
     except (HypervisorUnavailable, KeyError):
         db.rollback()
         raise upstream_unavailable("Hyperviseur") from None
-    vm.state = new_state
+    vm.state = target.value
     record_audit(
         db,
         actor_id=identity.user_id,
@@ -198,7 +217,7 @@ async def power_vm(
     )
     db.commit()
     db.refresh(vm)
-    return _out(vm, project_id)
+    return PowerOut(vm_id=vm.id, action=action, state=transient)
 
 
 async def console_vm(
@@ -210,6 +229,7 @@ async def console_vm(
     vm_id: str,
 ) -> ConsoleOut:
     """F5 : verifie le droit et le partage actif, puis fournit l'acces console."""
+    _project(db, project_id)
     vm = _load(db, vm_id)
     _visible_or_404(db, vm, project_id)
     await authorize(
@@ -222,9 +242,7 @@ async def console_vm(
     )
     try:
         access = await hypervisor.console(VmRef(vm.id))
-    except HypervisorUnavailable:
-        raise upstream_unavailable("Hyperviseur") from None
-    except KeyError:
+    except (HypervisorUnavailable, KeyError):
         raise upstream_unavailable("Hyperviseur") from None
     return ConsoleOut(url=access.url, expires_in=access.expires_in)
 
@@ -239,6 +257,39 @@ def _network_projects(db: Session, vm_id: str) -> list[str]:
     return list(db.scalars(statement))
 
 
+async def delete_vm_infrastructure(
+    db: Session,
+    hypervisor: HypervisorPort,
+    network: NetworkPort,
+    dns: DnsPort,
+    *,
+    actor_id: str,
+    vm: Vm,
+) -> None:
+    """Effets externes et suppression locale d'une VM. N'enregistre pas la transaction."""
+    projects = set(_network_projects(db, vm.id))
+    await revoke_all_for_resource(
+        db,
+        network,
+        actor_id=actor_id,
+        resource_type=ResourceType.VM.value,
+        resource_id=vm.id,
+    )
+    for owner in projects:
+        await network.detach_vm_from_project(VmRef(vm.id), owner)
+    await dns.delete_domain(vm.id)
+    await hypervisor.delete_vm(VmRef(vm.id))
+    db.execute(delete(NetworkVm).where(NetworkVm.vm_id == vm.id))
+    record_audit(
+        db,
+        actor_id=actor_id,
+        action="vm.deleted",
+        entity_type="vm",
+        entity_id=vm.id,
+    )
+    db.delete(vm)
+
+
 async def delete_vm(
     db: Session,
     iam: IamPort,
@@ -248,14 +299,11 @@ async def delete_vm(
     identity: Identity,
     project_id: str,
     vm_id: str,
-    confirm: bool,
-) -> None:
-    """F6 : supprime la VM apres confirmation, revoque les partages et appelle le DNS."""
-    if confirm is not True:
-        raise AppError(ErrorCode.VALIDATION_ERROR, "La suppression exige une confirmation explicite.")
+    confirmation_text: str | None,
+) -> DeletionPreviewOut | DeletionOut:
+    """F6 : protocole de suppression en deux temps, avec effets orchestres."""
+    _project(db, project_id)
     vm = _load(db, vm_id)
-    if vm.state == VmState.DELETING.value:
-        raise AppError(ErrorCode.INVALID_STATE, "La VM est deja en cours de suppression.")
     _visible_or_404(db, vm, project_id)
     await authorize(
         iam=iam,
@@ -265,55 +313,40 @@ async def delete_vm(
         required_right="vm.delete",
         resource=ResourceView(ResourceType.VM.value, vm.id, vm.origin_project_id),
     )
-    projects = set(_network_projects(db, vm.id))
-    try:
-        await revoke_all_for_resource(
-            db,
-            network,
-            actor_id=identity.user_id,
-            resource_type=ResourceType.VM.value,
-            resource_id=vm.id,
+    text = expected_text(vm.name)
+    if not is_confirmed(confirmation_text, text):
+        shares = db.scalar(
+            select(ResourceShare).where(
+                ResourceShare.resource_type == ResourceType.VM.value,
+                ResourceShare.resource_id == vm.id,
+                ResourceShare.status == "active",
+            ).limit(1)
         )
-        for owner in projects:
-            await network.detach_vm_from_project(VmRef(vm.id), owner)
-        await dns.delete_domain(vm.id)
-        await hypervisor.delete_vm(VmRef(vm.id))
-    except (NetworkUnavailable, DnsUnavailable, HypervisorUnavailable):
-        db.rollback()
-        raise upstream_unavailable("infrastructure") from None
+        networks = len(_network_projects(db, vm.id))
+        warning = (
+            f"La VM {vm.name} sera supprimee, retiree de {networks} reseau(x) et "
+            f"{'ses partages actifs seront revoques' if shares is not None else 'aucun partage actif a revoquer'}. "
+            "Cette action est irreversible."
+        )
+        return DeletionPreviewOut(confirmation_text=text, warning=warning)
+    try:
+        await delete_vm_infrastructure(
+            db,
+            hypervisor,
+            network,
+            dns,
+            actor_id=identity.user_id,
+            vm=vm,
+        )
     except AppError:
         db.rollback()
         raise
-    db.execute(delete(NetworkVm).where(NetworkVm.vm_id == vm.id))
-    record_audit(
-        db,
-        actor_id=identity.user_id,
-        action="vm.deleted",
-        entity_type="vm",
-        entity_id=vm.id,
-    )
-    db.delete(vm)
+    except (NetworkUnavailable, DnsUnavailable, HypervisorUnavailable, KeyError):
+        db.rollback()
+        raise upstream_unavailable("infrastructure") from None
     db.commit()
-
-
-async def share_vm(
-    db: Session,
-    iam: IamPort,
-    identity: Identity,
-    project_id: str,
-    vm_id: str,
-    dest_project_id: str,
-) -> ShareOut:
-    """F14 : partage la VM depuis son projet d'origine."""
-    vm = _load(db, vm_id)
-    if vm.origin_project_id != project_id:
-        raise AppError(ErrorCode.FORBIDDEN, "Le partage se fait depuis le projet d'origine.")
-    row = await create_share(
-        db,
-        iam,
-        user_id=identity.user_id,
-        resource_type=ResourceType.VM,
+    return DeletionOut(
+        resource_type="vm",
         resource_id=vm_id,
-        dest_project_id=dest_project_id,
+        message=f"La VM {vm.name} a bien ete supprimee.",
     )
-    return ShareOut.model_validate(row)

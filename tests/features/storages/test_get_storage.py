@@ -10,7 +10,7 @@ async def test_get_storage(client, db, iam):
     add_storage(db, project["id"], "st-1")
     response = client.get(f"/api/v1/projects/{project['id']}/storages/st-1", headers=headers)
     assert response.status_code == 200
-    assert response.json()["size"] == 100
+    assert response.json()["size_gb"] == 100
 
 
 async def test_get_storage_unknown(client, iam):

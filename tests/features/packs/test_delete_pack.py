@@ -3,15 +3,13 @@
 from app.features.requests.service import submit_request
 from app.shared.enums import RequestKind
 from app.shared.models.packs import Pack
-from tests.support import login_header, own_project
+from tests.support import add_pack, login_header, own_project
 
 
 async def test_delete_pack_blocked_by_pending_request(client, db, iam):
     """Un pack lie a une demande de creation en attente ne se supprime pas."""
     uid = await own_project(db, iam)
-    pack = Pack(name="Standard", ram=1, cpu=1, vram=1, ssd=1)
-    db.add(pack)
-    db.commit()
+    pack = add_pack(db, "Standard", ram_gb=1, vcpu=1, vram_gb=1, ssd_gb=1)
     await submit_request(
         db,
         iam,
@@ -29,9 +27,7 @@ async def test_delete_pack_blocked_by_pending_request(client, db, iam):
 
 async def test_delete_pack_when_unused(client, db, iam):
     """Un pack sans demande en attente est supprime."""
-    pack = Pack(name="Libre", ram=1, cpu=1, vram=1, ssd=1)
-    db.add(pack)
-    db.commit()
+    pack = add_pack(db, "Libre", ram_gb=1, vcpu=1, vram_gb=1, ssd_gb=1)
     headers = await login_header(iam, "root@x.cm")
     response = client.delete(f"/api/v1/admin/packs/{pack.id}", headers=headers)
     assert response.status_code == 204

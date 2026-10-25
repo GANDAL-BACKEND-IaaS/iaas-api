@@ -1,4 +1,6 @@
 [
-  {"name": "Standard", "ram": 2048, "cpu": 2, "vram": 128, "ssd": 40},
-  {"name": "Premium", "ram": 8192, "cpu": 4, "vram": 512, "ssd": 160}
+  {"name": "Standard", "description": "Configuration generale",
+   "ram_gb": 8, "vcpu": 4, "vram_gb": 0, "ssd_gb": 80},
+  {"name": "Premium", "description": "Configuration renforcee",
+   "ram_gb": 16, "vcpu": 8, "vram_gb": 1, "ssd_gb": 160}
 ]

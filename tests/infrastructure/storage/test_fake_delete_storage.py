@@ -9,7 +9,7 @@ async def test_delete_storage_is_replayable():
     storage = FakeStorage()
     ref = await storage.create_storage(StorageSpec("docs", 10))
     await storage.resize(ref, 20)
-    assert storage.spaces[ref.storage_id].size == 20
+    assert storage.spaces[ref.storage_id].size_gb == 20
     await storage.delete_storage(ref)
     await storage.delete_storage(StorageRef("absent"))
     assert storage.spaces == {}

@@ -1,13 +1,18 @@
-"""Schema initial du backend IaaS : projets, ressources, demandes, partages, audit."""
+"""Schema initial de l'API IaaS : identifiants UUID et unites explicites.
+
+Revision creee apres la refonte du contrat d'API. Toutes les cles primaires et
+etrangeres du domaine sont des chaines UUID de 36 caracteres.
+"""
 
 from typing import Sequence, Union
 
+from alembic import op
 import sqlalchemy as sa
 
-from alembic import op
+
 
 # revision identifiers, used by Alembic.
-revision: str = 'f60e7764b833'
+revision: str = '49c95feb0fac'
 down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -21,7 +26,7 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('id')
     )
     op.create_table('audit_logs',
-    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('id', sa.String(length=36), nullable=False),
     sa.Column('actor_id', sa.String(length=36), nullable=False),
     sa.Column('action', sa.String(length=64), nullable=False),
     sa.Column('entity_type', sa.String(length=32), nullable=False),
@@ -32,17 +37,20 @@ def upgrade() -> None:
     )
     op.create_index(op.f('ix_audit_logs_actor_id'), 'audit_logs', ['actor_id'], unique=False)
     op.create_table('packs',
-    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('id', sa.String(length=36), nullable=False),
     sa.Column('name', sa.String(length=64), nullable=False),
-    sa.Column('ram', sa.Integer(), nullable=False),
-    sa.Column('cpu', sa.Integer(), nullable=False),
-    sa.Column('vram', sa.Integer(), nullable=False),
-    sa.Column('ssd', sa.Integer(), nullable=False),
+    sa.Column('description', sa.String(length=255), nullable=False),
+    sa.Column('ram_gb', sa.Integer(), nullable=False),
+    sa.Column('vcpu', sa.Integer(), nullable=False),
+    sa.Column('vram_gb', sa.Integer(), nullable=False),
+    sa.Column('ssd_gb', sa.Integer(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('name')
     )
     op.create_table('profiles',
-    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('id', sa.String(length=36), nullable=False),
     sa.Column('name', sa.String(length=64), nullable=False),
     sa.Column('description', sa.String(length=255), nullable=False),
     sa.PrimaryKeyConstraint('id'),
@@ -53,7 +61,8 @@ def upgrade() -> None:
     sa.Column('name', sa.String(length=128), nullable=False),
     sa.Column('owner_id', sa.String(length=36), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
-    sa.PrimaryKeyConstraint('id')
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('owner_id', 'name', name='uq_project_owner_name')
     )
     op.create_index(op.f('ix_projects_owner_id'), 'projects', ['owner_id'], unique=False)
     op.create_table('rights',
@@ -66,26 +75,31 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('id')
     )
     op.create_table('invitations',
-    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('id', sa.String(length=36), nullable=False),
     sa.Column('project_id', sa.String(length=36), nullable=False),
     sa.Column('inviter_id', sa.String(length=36), nullable=False),
-    sa.Column('invitee_email', sa.String(length=255), nullable=False),
+    sa.Column('invitee_id', sa.String(length=36), nullable=False),
     sa.Column('status', sa.String(length=16), nullable=False),
-    sa.Column('profile_id', sa.Integer(), nullable=True),
-    sa.Column('rights_snapshot', sa.JSON(), nullable=False),
+    sa.Column('profile_id', sa.String(length=36), nullable=True),
+    sa.Column('additional_rights', sa.JSON(), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
     sa.ForeignKeyConstraint(['profile_id'], ['profiles.id'], ondelete='SET NULL'),
     sa.ForeignKeyConstraint(['project_id'], ['projects.id'], ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id')
     )
+    op.create_index(op.f('ix_invitations_invitee_id'), 'invitations', ['invitee_id'], unique=False)
     op.create_index(op.f('ix_invitations_project_id'), 'invitations', ['project_id'], unique=False)
     op.create_index(op.f('ix_invitations_status'), 'invitations', ['status'], unique=False)
     op.create_table('memberships',
-    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('id', sa.String(length=36), nullable=False),
     sa.Column('project_id', sa.String(length=36), nullable=False),
     sa.Column('user_id', sa.String(length=36), nullable=False),
     sa.Column('role', sa.String(length=16), nullable=False),
+    sa.Column('profile_id', sa.String(length=36), nullable=True),
+    sa.Column('additional_rights', sa.JSON(), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.ForeignKeyConstraint(['profile_id'], ['profiles.id'], ondelete='SET NULL'),
     sa.ForeignKeyConstraint(['project_id'], ['projects.id'], ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('project_id', 'user_id', name='uq_membership_project_user')
@@ -98,18 +112,19 @@ def upgrade() -> None:
     sa.Column('name', sa.String(length=128), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
     sa.ForeignKeyConstraint(['project_id'], ['projects.id'], ondelete='CASCADE'),
-    sa.PrimaryKeyConstraint('id')
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('project_id', 'name', name='uq_network_project_name')
     )
     op.create_index(op.f('ix_networks_project_id'), 'networks', ['project_id'], unique=False)
     op.create_table('profile_rights',
-    sa.Column('profile_id', sa.Integer(), nullable=False),
+    sa.Column('profile_id', sa.String(length=36), nullable=False),
     sa.Column('right_code', sa.String(length=64), nullable=False),
     sa.ForeignKeyConstraint(['profile_id'], ['profiles.id'], ondelete='CASCADE'),
     sa.ForeignKeyConstraint(['right_code'], ['rights.code'], ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('profile_id', 'right_code')
     )
     op.create_table('resource_requests',
-    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('id', sa.String(length=36), nullable=False),
     sa.Column('project_id', sa.String(length=36), nullable=False),
     sa.Column('author_id', sa.String(length=36), nullable=False),
     sa.Column('kind', sa.String(length=32), nullable=False),
@@ -128,7 +143,7 @@ def upgrade() -> None:
     op.create_index(op.f('ix_resource_requests_project_id'), 'resource_requests', ['project_id'], unique=False)
     op.create_index(op.f('ix_resource_requests_status'), 'resource_requests', ['status'], unique=False)
     op.create_table('resource_shares',
-    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('id', sa.String(length=36), nullable=False),
     sa.Column('resource_type', sa.String(length=16), nullable=False),
     sa.Column('resource_id', sa.String(length=36), nullable=False),
     sa.Column('origin_project_id', sa.String(length=36), nullable=False),
@@ -148,36 +163,33 @@ def upgrade() -> None:
     sa.Column('id', sa.String(length=36), nullable=False),
     sa.Column('origin_project_id', sa.String(length=36), nullable=False),
     sa.Column('name', sa.String(length=128), nullable=False),
-    sa.Column('size', sa.Integer(), nullable=False),
+    sa.Column('ip_address', sa.String(length=45), nullable=True),
+    sa.Column('size_gb', sa.Integer(), nullable=False),
     sa.Column('state', sa.String(length=16), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
     sa.ForeignKeyConstraint(['origin_project_id'], ['projects.id'], ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id')
     )
+    op.create_index(op.f('ix_storages_ip_address'), 'storages', ['ip_address'], unique=False)
     op.create_index(op.f('ix_storages_origin_project_id'), 'storages', ['origin_project_id'], unique=False)
     op.create_table('vms',
     sa.Column('id', sa.String(length=36), nullable=False),
     sa.Column('origin_project_id', sa.String(length=36), nullable=False),
     sa.Column('name', sa.String(length=128), nullable=False),
-    sa.Column('ram', sa.Integer(), nullable=False),
-    sa.Column('cpu', sa.Integer(), nullable=False),
-    sa.Column('vram', sa.Integer(), nullable=False),
-    sa.Column('ssd', sa.Integer(), nullable=False),
-    sa.Column('pack_id', sa.Integer(), nullable=True),
+    sa.Column('ip_address', sa.String(length=45), nullable=True),
+    sa.Column('ram_gb', sa.Integer(), nullable=False),
+    sa.Column('vcpu', sa.Integer(), nullable=False),
+    sa.Column('vram_gb', sa.Integer(), nullable=False),
+    sa.Column('ssd_gb', sa.Integer(), nullable=False),
+    sa.Column('pack_id', sa.String(length=36), nullable=True),
     sa.Column('state', sa.String(length=16), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
     sa.ForeignKeyConstraint(['origin_project_id'], ['projects.id'], ondelete='CASCADE'),
     sa.ForeignKeyConstraint(['pack_id'], ['packs.id'], ondelete='SET NULL'),
     sa.PrimaryKeyConstraint('id')
     )
+    op.create_index(op.f('ix_vms_ip_address'), 'vms', ['ip_address'], unique=False)
     op.create_index(op.f('ix_vms_origin_project_id'), 'vms', ['origin_project_id'], unique=False)
-    op.create_table('membership_rights',
-    sa.Column('membership_id', sa.Integer(), nullable=False),
-    sa.Column('right_code', sa.String(length=64), nullable=False),
-    sa.ForeignKeyConstraint(['membership_id'], ['memberships.id'], ondelete='CASCADE'),
-    sa.ForeignKeyConstraint(['right_code'], ['rights.code'], ondelete='CASCADE'),
-    sa.PrimaryKeyConstraint('membership_id', 'right_code')
-    )
     op.create_table('network_vms',
     sa.Column('network_id', sa.String(length=36), nullable=False),
     sa.Column('vm_id', sa.String(length=36), nullable=False),
@@ -193,10 +205,11 @@ def downgrade() -> None:
     """Annule la revision."""
     # ### commands auto generated by Alembic - please adjust! ###
     op.drop_table('network_vms')
-    op.drop_table('membership_rights')
     op.drop_index(op.f('ix_vms_origin_project_id'), table_name='vms')
+    op.drop_index(op.f('ix_vms_ip_address'), table_name='vms')
     op.drop_table('vms')
     op.drop_index(op.f('ix_storages_origin_project_id'), table_name='storages')
+    op.drop_index(op.f('ix_storages_ip_address'), table_name='storages')
     op.drop_table('storages')
     op.drop_index(op.f('ix_resource_shares_status'), table_name='resource_shares')
     op.drop_index(op.f('ix_resource_shares_resource_id'), table_name='resource_shares')
@@ -215,6 +228,7 @@ def downgrade() -> None:
     op.drop_table('memberships')
     op.drop_index(op.f('ix_invitations_status'), table_name='invitations')
     op.drop_index(op.f('ix_invitations_project_id'), table_name='invitations')
+    op.drop_index(op.f('ix_invitations_invitee_id'), table_name='invitations')
     op.drop_table('invitations')
     op.drop_table('users')
     op.drop_table('rights')

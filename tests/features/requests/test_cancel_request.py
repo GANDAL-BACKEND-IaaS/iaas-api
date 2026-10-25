@@ -7,7 +7,7 @@ from app.features.requests.service import cancel_request, submit_request
 from app.shared.enums import RequestKind, RequestStatus
 from tests.support import own_project
 
-_CUSTOM = {"name": "web", "ram": 2048, "cpu": 2, "vram": 128, "ssd": 40}
+_CUSTOM = {"name": "web", "configuration": {"ram_gb": 2, "vcpu": 2, "vram_gb": 1, "ssd_gb": 40}}
 
 
 async def _pending(db, iam):
@@ -47,5 +47,5 @@ async def test_cannot_cancel_twice(db, iam):
 def test_unknown_request_is_not_found(db):
     """Une demande absente repond introuvable."""
     with pytest.raises(AppError) as exc:
-        cancel_request(db, author_id="nobody", request_id=404)
+        cancel_request(db, author_id="nobody", request_id="inconnu")
     assert exc.value.code == ErrorCode.NOT_FOUND

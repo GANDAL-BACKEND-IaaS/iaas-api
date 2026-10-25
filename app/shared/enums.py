@@ -58,9 +58,21 @@ class ResourceType(StrEnum):
 class VmState(StrEnum):
     """Etat local connu d'une VM. La consultation reste possible si l'hyperviseur est indisponible."""
 
+    PENDING = "pending"
+    CREATING = "creating"
     STOPPED = "stopped"
     RUNNING = "running"
     DELETING = "deleting"
+    ERROR = "error"
+    UNKNOWN = "unknown"
+
+
+class PowerState(StrEnum):
+    """Etat transitoire renvoye par une action d'alimentation (202 Accepted)."""
+
+    STARTING = "starting"
+    STOPPING = "stopping"
+    RESTARTING = "restarting"
 
 
 class StorageState(StrEnum):
@@ -76,3 +88,18 @@ class PowerAction(StrEnum):
     START = "start"
     STOP = "stop"
     RESTART = "restart"
+
+
+# Etat local vise apres une action d'alimentation reussie, et etat transitoire expose.
+POWER_TARGET: dict[PowerAction, tuple[VmState, PowerState]] = {
+    PowerAction.START: (VmState.RUNNING, PowerState.STARTING),
+    PowerAction.STOP: (VmState.STOPPED, PowerState.STOPPING),
+    PowerAction.RESTART: (VmState.RUNNING, PowerState.RESTARTING),
+}
+
+# Etats depuis lesquels une action est autorisee.
+POWER_ALLOWED: dict[PowerAction, frozenset[VmState]] = {
+    PowerAction.START: frozenset({VmState.STOPPED}),
+    PowerAction.STOP: frozenset({VmState.RUNNING}),
+    PowerAction.RESTART: frozenset({VmState.RUNNING}),
+}

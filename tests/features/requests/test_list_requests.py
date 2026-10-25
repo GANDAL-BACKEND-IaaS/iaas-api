@@ -6,7 +6,7 @@ from app.features.requests.service import list_requests, submit_request
 from app.shared.enums import RequestKind, RequestStatus
 from tests.support import add_project, own_project, user_id
 
-_CUSTOM = {"name": "web", "ram": 2048, "cpu": 2, "vram": 128, "ssd": 40}
+_CUSTOM = {"name": "web", "configuration": {"ram_gb": 2, "vcpu": 2, "vram_gb": 1, "ssd_gb": 40}}
 
 
 async def test_user_sees_only_own_requests(db, iam):
@@ -23,8 +23,8 @@ async def test_user_sees_only_own_requests(db, iam):
         db, iam, author_id=other.user_id, project_id="p9", kind=RequestKind.VM_CREATE,
         payload=_CUSTOM, target_resource_id=None,
     )
-    rows, total = list_requests(
-        db, actor_id=uid, actor_role=GlobalRole.USER, params=PageParams(page=1, page_size=20),
+    rows, total = await list_requests(
+        db, iam, actor_id=uid, actor_role=GlobalRole.USER, params=PageParams(page=1, page_size=20),
     )
     assert total == 1
     assert rows[0].author_id == uid
@@ -38,12 +38,12 @@ async def test_admin_can_filter_by_status(db, iam):
         payload=_CUSTOM, target_resource_id=None,
     )
     admin = await user_id(iam, "root@x.cm")
-    _, pending = list_requests(
-        db, actor_id=admin, actor_role=GlobalRole.ADMIN, params=PageParams(),
+    _, pending = await list_requests(
+        db, iam, actor_id=admin, actor_role=GlobalRole.ADMIN, params=PageParams(),
         status=RequestStatus.PENDING,
     )
-    _, accepted = list_requests(
-        db, actor_id=admin, actor_role=GlobalRole.ADMIN, params=PageParams(),
+    _, accepted = await list_requests(
+        db, iam, actor_id=admin, actor_role=GlobalRole.ADMIN, params=PageParams(),
         status=RequestStatus.ACCEPTED,
     )
     assert pending == 1
@@ -57,8 +57,8 @@ async def test_page_past_the_end_is_empty(db, iam):
         db, iam, author_id=uid, project_id="p1", kind=RequestKind.VM_CREATE,
         payload=_CUSTOM, target_resource_id=None,
     )
-    rows, total = list_requests(
-        db, actor_id=uid, actor_role=GlobalRole.USER, params=PageParams(page=3, page_size=20),
+    rows, total = await list_requests(
+        db, iam, actor_id=uid, actor_role=GlobalRole.USER, params=PageParams(page=3, page_size=20),
     )
     assert rows == []
     assert total == 1

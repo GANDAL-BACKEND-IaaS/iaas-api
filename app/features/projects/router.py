@@ -1,10 +1,9 @@
-"""Routes projets, membres et invitations. Proprietaire : ZUCHUON.
+"""Routes projets, membres et invitations.
 
-Chaque route declare son schema entrant, son schema sortant et ses erreurs.
-L'implementation metier reste a completer dans service.py.
+Les suppressions suivent le protocole commun en deux temps (section 1.5).
 """
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Body, Depends, Query, Response, status
 from sqlalchemy.orm import Session
 
 from app.application.ports.dns import DnsPort
@@ -27,14 +26,16 @@ from app.core.pagination import Page, PageParams, get_page_params
 from app.features.auth.dependencies import get_current_identity
 from app.features.projects import service
 from app.features.projects.schemas import (
-    ConfirmIn,
     InvitationCreateIn,
     InvitationOut,
-    MemberOut,
+    MemberRightsUpdateIn,
     ProjectCreateIn,
+    ProjectMemberOut,
     ProjectOut,
     ProjectUpdateIn,
 )
+from app.shared.deletion import DeletionIn, DeletionResponse
+from app.shared.enums import InvitationStatus, MembershipRole
 
 router = APIRouter(prefix="/projects", tags=["projets"])
 invitations = APIRouter(prefix="/invitations", tags=["invitations"])
@@ -44,23 +45,22 @@ _USER = (
     ErrorCode.FORBIDDEN,
     ErrorCode.NOT_FOUND,
     ErrorCode.VALIDATION_ERROR,
-    ErrorCode.NOT_IMPLEMENTED,
 )
+_MEMBER_DELETE = (*_USER, ErrorCode.UPSTREAM_UNAVAILABLE)
 _WRITE = (
     ErrorCode.UNAUTHORIZED,
     ErrorCode.FORBIDDEN,
     ErrorCode.NOT_FOUND,
     ErrorCode.CONFLICT,
     ErrorCode.VALIDATION_ERROR,
-    ErrorCode.NOT_IMPLEMENTED,
 )
 _DELETE = (
     ErrorCode.UNAUTHORIZED,
     ErrorCode.FORBIDDEN,
     ErrorCode.NOT_FOUND,
-    ErrorCode.VALIDATION_ERROR,
+    ErrorCode.BAD_REQUEST,
     ErrorCode.UPSTREAM_UNAVAILABLE,
-    ErrorCode.NOT_IMPLEMENTED,
+    ErrorCode.VALIDATION_ERROR,
 )
 
 
@@ -87,7 +87,7 @@ async def create_project(
     response_model=Page[ProjectOut],
     operation_id="list_projects",
     summary="Lister mes projets",
-    responses=error_responses(ErrorCode.UNAUTHORIZED, ErrorCode.VALIDATION_ERROR, ErrorCode.NOT_IMPLEMENTED),
+    responses=error_responses(ErrorCode.UNAUTHORIZED, ErrorCode.VALIDATION_ERROR),
 )
 async def list_projects(
     identity: Identity = Depends(get_current_identity),
@@ -95,7 +95,7 @@ async def list_projects(
     db: Session = Depends(get_db),
     params: PageParams = Depends(get_page_params),
 ) -> Page[ProjectOut]:
-    """F12 : liste paginee des projets de l'appelant."""
+    """F12 : liste paginee des projets de l'appelant, triee par nom."""
     return await service.list_projects(db, iam, identity, params)
 
 
@@ -136,15 +136,14 @@ async def rename_project(
 
 @router.post(
     "/{project_id}/deletion",
-    status_code=status.HTTP_204_NO_CONTENT,
+    response_model=DeletionResponse,
     operation_id="delete_project",
     summary="Supprimer un projet",
-    description="Exige une confirmation explicite. Suppression en cascade (R23).",
+    description="Protocole en deux temps. Suppression en cascade des ressources du projet (R23).",
     responses=error_responses(*_DELETE),
 )
 async def delete_project(
     project_id: str,
-    body: ConfirmIn,
     identity: Identity = Depends(get_current_identity),
     iam: IamPort = Depends(get_iam),
     hypervisor: HypervisorPort = Depends(get_hypervisor),
@@ -152,16 +151,25 @@ async def delete_project(
     dns: DnsPort = Depends(get_dns),
     storage: StoragePort = Depends(get_storage),
     db: Session = Depends(get_db),
-) -> None:
-    """F12 : supprime le projet et ce qu'il contient, apres confirmation."""
-    await service.delete_project(
-        db, iam, hypervisor, network, dns, storage, identity, project_id, body.confirm
+    body: DeletionIn = Body(default_factory=DeletionIn),
+):
+    """F12 : apercu puis suppression effective du projet et de ses ressources."""
+    return await service.delete_project(
+        db,
+        iam,
+        hypervisor,
+        network,
+        dns,
+        storage,
+        identity,
+        project_id,
+        body.confirmation_text,
     )
 
 
 @router.get(
     "/{project_id}/members",
-    response_model=Page[MemberOut],
+    response_model=Page[ProjectMemberOut],
     operation_id="list_project_members",
     summary="Lister les membres",
     responses=error_responses(*_USER),
@@ -172,9 +180,53 @@ async def list_members(
     iam: IamPort = Depends(get_iam),
     db: Session = Depends(get_db),
     params: PageParams = Depends(get_page_params),
-) -> Page[MemberOut]:
-    """F12 : liste paginee des membres du projet."""
-    return await service.list_members(db, iam, identity, project_id, params)
+    role: MembershipRole | None = Query(default=None),
+) -> Page[ProjectMemberOut]:
+    """F12 : liste paginee des membres du projet, filtrable par role."""
+    return await service.list_members(
+        db, iam, identity, project_id, params, role=role
+    )
+
+
+@router.put(
+    "/{project_id}/members/{user_id}/rights",
+    response_model=ProjectMemberOut,
+    operation_id="update_member_rights",
+    summary="Modifier les droits d'un membre",
+    responses=error_responses(*_WRITE),
+)
+async def update_member_rights(
+    project_id: str,
+    user_id: str,
+    body: MemberRightsUpdateIn,
+    identity: Identity = Depends(get_current_identity),
+    iam: IamPort = Depends(get_iam),
+    db: Session = Depends(get_db),
+) -> ProjectMemberOut:
+    """F12 : remplace le profil et/ou les droits additionnels d'un invite."""
+    return await service.update_member_rights(
+        db, iam, identity, project_id, user_id, body
+    )
+
+
+@router.delete(
+    "/{project_id}/members/{user_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    operation_id="remove_project_member",
+    summary="Retirer un membre",
+    responses=error_responses(*_MEMBER_DELETE),
+)
+async def remove_member(
+    project_id: str,
+    user_id: str,
+    identity: Identity = Depends(get_current_identity),
+    iam: IamPort = Depends(get_iam),
+    network: NetworkPort = Depends(get_network),
+    db: Session = Depends(get_db),
+) -> Response:
+    """F12 : retire un invite du projet. Le proprietaire ne peut pas etre retire."""
+    await service.remove_member(db, iam, network, identity, project_id, user_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post(
@@ -194,14 +246,16 @@ async def create_invitation(
     db: Session = Depends(get_db),
 ) -> InvitationOut:
     """F13 : invite un utilisateur. Les droits d'un invite sont plafonnes aux siens (R8)."""
-    return await service.create_invitation(db, iam, notifications, identity, project_id, body)
+    return await service.create_invitation(
+        db, iam, notifications, identity, project_id, body
+    )
 
 
 @router.get(
     "/{project_id}/invitations",
     response_model=Page[InvitationOut],
     operation_id="list_invitations",
-    summary="Lister les invitations",
+    summary="Lister les invitations d'un projet",
     responses=error_responses(*_USER),
 )
 async def list_invitations(
@@ -210,9 +264,38 @@ async def list_invitations(
     iam: IamPort = Depends(get_iam),
     db: Session = Depends(get_db),
     params: PageParams = Depends(get_page_params),
+    invitation_status: InvitationStatus | None = Query(default=None, alias="status"),
+    invitee_id: str | None = Query(default=None),
 ) -> Page[InvitationOut]:
     """F13 : liste paginee des invitations du projet."""
-    return await service.list_invitations(db, iam, identity, project_id, params)
+    return await service.list_project_invitations(
+        db,
+        iam,
+        identity,
+        project_id,
+        params,
+        status=invitation_status,
+        invitee_id=invitee_id,
+    )
+
+
+@invitations.get(
+    "",
+    response_model=Page[InvitationOut],
+    operation_id="list_my_invitations",
+    summary="Lister mes invitations",
+    responses=error_responses(ErrorCode.UNAUTHORIZED, ErrorCode.VALIDATION_ERROR),
+)
+def list_my_invitations(
+    identity: Identity = Depends(get_current_identity),
+    db: Session = Depends(get_db),
+    params: PageParams = Depends(get_page_params),
+    invitation_status: InvitationStatus | None = Query(default=None, alias="status"),
+) -> Page[InvitationOut]:
+    """F13 : invitations recues par l'appelant."""
+    return service.list_my_invitations(
+        db, identity, params, status=invitation_status
+    )
 
 
 @invitations.post(
@@ -223,7 +306,7 @@ async def list_invitations(
     responses=error_responses(*_WRITE),
 )
 async def accept_invitation(
-    invitation_id: int,
+    invitation_id: str,
     identity: Identity = Depends(get_current_identity),
     iam: IamPort = Depends(get_iam),
     db: Session = Depends(get_db),
@@ -240,7 +323,7 @@ async def accept_invitation(
     responses=error_responses(*_WRITE),
 )
 def refuse_invitation(
-    invitation_id: int,
+    invitation_id: str,
     identity: Identity = Depends(get_current_identity),
     db: Session = Depends(get_db),
 ) -> InvitationOut:
@@ -255,10 +338,11 @@ def refuse_invitation(
     summary="Annuler une invitation",
     responses=error_responses(*_WRITE),
 )
-def cancel_invitation(
-    invitation_id: int,
+async def cancel_invitation(
+    invitation_id: str,
     identity: Identity = Depends(get_current_identity),
+    iam: IamPort = Depends(get_iam),
     db: Session = Depends(get_db),
 ) -> InvitationOut:
     """F13 : annule une invitation pas encore acceptee (R9)."""
-    return service.cancel_invitation(db, identity, invitation_id)
+    return await service.cancel_invitation(db, iam, identity, invitation_id)

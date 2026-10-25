@@ -1,6 +1,11 @@
-"""Pagination des listes (exigence non fonctionnelle : echelle et performance).
+"""Pagination commune a toutes les listes de l'API.
 
-Toutes les listes de l'API renvoient une Page : items, total, page, page_size.
+Envelope imposee par le contrat :
+
+    {"items": [], "page": 1, "page_size": 20, "total_items": 0, "total_pages": 0}
+
+`total_items` compte les elements avant pagination. `total_pages` vaut 0 quand
+la liste est vide, sinon l'arrondi superieur de total_items / page_size.
 """
 
 from collections.abc import Sequence
@@ -25,9 +30,24 @@ class Page(BaseModel, Generic[T]):
     """Page de resultats. Le type T est le schema sortant de chaque element."""
 
     items: list[T]
-    total: int = Field(description="Nombre total d'elements, toutes pages confondues.")
     page: int
     page_size: int
+    total_items: int = Field(description="Nombre total d'elements, toutes pages confondues.")
+    total_pages: int = Field(description="Nombre total de pages. Vaut 0 si la liste est vide.")
+
+    @classmethod
+    def build(cls, items: Sequence[T], total_items: int, params: PageParams) -> "Page[T]":
+        """Construit une page en calculant `total_pages` de facon uniforme."""
+        total_pages = 0
+        if total_items > 0:
+            total_pages = (total_items + params.page_size - 1) // params.page_size
+        return cls(
+            items=list(items),
+            page=params.page,
+            page_size=params.page_size,
+            total_items=total_items,
+            total_pages=total_pages,
+        )
 
 
 def get_page_params(

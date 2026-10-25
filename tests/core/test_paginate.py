@@ -4,7 +4,7 @@ import pytest
 from pydantic import ValidationError
 from sqlalchemy import select
 
-from app.core.pagination import PageParams, get_page_params, paginate
+from app.core.pagination import Page, PageParams, get_page_params, paginate
 from app.shared.models.projects import Project
 from tests.support import add_project
 
@@ -25,6 +25,33 @@ def test_paginate_past_the_end_is_empty(db):
     rows, total = paginate(db, select(Project).order_by(Project.name), PageParams(page=9, page_size=20))
     assert list(rows) == []
     assert total == 1
+
+
+def test_page_envelope_uses_contract_field_names():
+    """L'enveloppe expose total_items et total_pages, pas `total`."""
+    page = Page.build(["a", "b"], 5, PageParams(page=2, page_size=2))
+    assert page.model_dump() == {
+        "items": ["a", "b"],
+        "page": 2,
+        "page_size": 2,
+        "total_items": 5,
+        "total_pages": 3,
+    }
+
+
+def test_total_pages_is_zero_for_an_empty_result():
+    """Une liste vide a total_pages = 0, meme si page est fourni."""
+    page = Page.build([], 0, PageParams(page=1, page_size=20))
+    assert page.total_items == 0
+    assert page.total_pages == 0
+
+
+def test_page_beyond_the_end_keeps_calculated_totals():
+    """Page hors bornes : items vides, totaux conserves."""
+    page = Page.build([], 41, PageParams(page=9, page_size=20))
+    assert page.items == []
+    assert page.total_items == 41
+    assert page.total_pages == 3
 
 
 def test_page_params_reject_zero():

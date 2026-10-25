@@ -2,6 +2,7 @@
 
 Le backend ne connait que ce contrat : entrees, sorties, erreurs.
 Chaque appel a un delai maximal cote adaptateur et doit pouvoir etre rejoue sans effet de bord.
+Les unites sont explicites : RAM, VRAM et SSD en Go, CPU en vCPU.
 """
 
 from abc import ABC, abstractmethod
@@ -23,17 +24,18 @@ class VmSpec:
     """Caracteristiques de base demandees a l'hyperviseur."""
 
     name: str
-    ram: int
-    cpu: int
-    vram: int
-    ssd: int
+    ram_gb: int
+    vcpu: int
+    vram_gb: int
+    ssd_gb: int
 
 
 @dataclass(frozen=True)
 class VmRef:
-    """Identifiant d'une VM cote hyperviseur."""
+    """Identifiant d'une VM cote hyperviseur, avec l'adresse IP si deja attribuee."""
 
     vm_id: str
+    ip_address: str | None = None
 
 
 @dataclass(frozen=True)

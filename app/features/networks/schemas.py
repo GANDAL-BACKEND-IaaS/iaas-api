@@ -1,16 +1,32 @@
-"""Schemas reseau. Proprietaire : KOM."""
+"""Schemas reseau."""
 
-from datetime import datetime
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from pydantic import BaseModel, ConfigDict, Field
+from app.shared.time import UtcDateTime
+
+
+def _not_blank(value: str) -> str:
+    if not value.strip():
+        raise ValueError("Le nom ne peut pas etre vide.")
+    return value.strip()
 
 
 class NetworkCreateIn(BaseModel):
     """Creation d'un reseau dans un projet (F7)."""
 
-    model_config = ConfigDict(json_schema_extra={"examples": [{"name": "lan-projet"}]})
+    model_config = ConfigDict(json_schema_extra={"examples": [{"name": "lan-production"}]})
 
     name: str = Field(min_length=1, max_length=128)
+
+    _trim = field_validator("name")(_not_blank)
+
+
+class NetworkUpdateIn(BaseModel):
+    """Renommage d'un reseau."""
+
+    name: str = Field(min_length=1, max_length=128)
+
+    _trim = field_validator("name")(_not_blank)
 
 
 class NetworkMembershipIn(BaseModel):
@@ -28,4 +44,4 @@ class NetworkOut(BaseModel):
     project_id: str
     name: str
     vm_ids: list[str] = Field(default_factory=list)
-    created_at: datetime
+    created_at: UtcDateTime

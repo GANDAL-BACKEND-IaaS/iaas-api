@@ -9,7 +9,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 from pydantic import ValidationError
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.application.ports.hypervisor import HypervisorPort, HypervisorUnavailable, VmRef, VmSpec
@@ -20,10 +20,10 @@ from app.core.audit import record_audit
 from app.core.errors import AppError, ErrorCode, upstream_unavailable
 from app.core.pagination import PageParams, paginate
 from app.features.requests.schemas import (
-    StorageCreatePayload,
-    StorageUpdatePayload,
-    VmCreatePayload,
-    VmUpdatePayload,
+    StorageCreateRequestIn,
+    StorageUpdateRequestIn,
+    VMCreateRequestIn,
+    VMUpdateRequestIn,
 )
 from app.shared.enums import RequestKind, RequestStatus, ResourceType, StorageState, VmState
 from app.shared.models.packs import Pack
@@ -71,7 +71,7 @@ def _validation(exc: ValidationError) -> AppError:
     return AppError(ErrorCode.VALIDATION_ERROR, "Charge utile invalide.", details=exc.errors())
 
 
-def _get_request(db: Session, request_id: int) -> ResourceRequest:
+def _get_request(db: Session, request_id: str) -> ResourceRequest:
     row = db.get(ResourceRequest, request_id)
     if row is None:
         raise AppError(ErrorCode.NOT_FOUND, "Demande introuvable.")
@@ -87,16 +87,9 @@ def _require_project(db: Session, project_id: str) -> Project:
 
 def _normalize_vm_create(db: Session, payload: dict) -> dict:
     try:
-        data = VmCreatePayload.model_validate(payload)
+        data = VMCreateRequestIn.model_validate(payload)
     except ValidationError as exc:
         raise _validation(exc) from None
-    custom = [data.ram, data.cpu, data.vram, data.ssd]
-    has_custom = any(value is not None for value in custom)
-    if data.pack_id is not None and has_custom:
-        raise AppError(
-            ErrorCode.VALIDATION_ERROR,
-            "Choisir un pack ou une configuration personnalisee, pas les deux.",
-        )
     if data.pack_id is not None:
         pack = db.get(Pack, data.pack_id)
         if pack is None:
@@ -104,45 +97,43 @@ def _normalize_vm_create(db: Session, payload: dict) -> dict:
         return {
             "name": data.name,
             "pack_id": pack.id,
-            "ram": pack.ram,
-            "cpu": pack.cpu,
-            "vram": pack.vram,
-            "ssd": pack.ssd,
+            "ram_gb": pack.ram_gb,
+            "vcpu": pack.vcpu,
+            "vram_gb": pack.vram_gb,
+            "ssd_gb": pack.ssd_gb,
         }
-    if any(value is None for value in custom):
-        raise AppError(
-            ErrorCode.VALIDATION_ERROR,
-            "La configuration personnalisee exige ram, cpu, vram et ssd.",
-        )
-    return data.model_dump()
+    assert data.configuration is not None  # garanti par le validateur du schema
+    return {"name": data.name, "configuration": data.configuration.model_dump()}
 
 
 def _normalize_vm_update(payload: dict) -> dict:
     try:
-        data = VmUpdatePayload.model_validate(payload)
+        return VMUpdateRequestIn.model_validate(payload).model_dump()
     except ValidationError as exc:
         raise _validation(exc) from None
-    if all(value is None for value in (data.ram, data.cpu, data.vram, data.ssd)):
-        raise AppError(ErrorCode.VALIDATION_ERROR, "Au moins une caracteristique doit etre fournie.")
-    return data.model_dump()
 
 
 def _normalize_storage_create(payload: dict) -> dict:
     try:
-        return StorageCreatePayload.model_validate(payload).model_dump()
+        return StorageCreateRequestIn.model_validate(payload).model_dump()
     except ValidationError as exc:
         raise _validation(exc) from None
 
 
 def _normalize_storage_update(payload: dict) -> dict:
     try:
-        return StorageUpdatePayload.model_validate(payload).model_dump()
+        return StorageUpdateRequestIn.model_validate(payload).model_dump()
     except ValidationError as exc:
         raise _validation(exc) from None
 
 
-def _prepare(db: Session, kind: RequestKind, payload: dict, target_resource_id: str | None):
-    """Valide la charge et retourne (payload normalise, type cible, vue ressource ou None)."""
+def _prepare(
+    db: Session,
+    kind: RequestKind,
+    payload: dict,
+    target_resource_id: str | None,
+) -> tuple[dict, str | None, ResourceView | None]:
+    """Valide la charge et retourne (payload normalise, type cible, vue ressource)."""
     if kind == RequestKind.VM_CREATE:
         if target_resource_id is not None:
             raise AppError(ErrorCode.VALIDATION_ERROR, "Une creation ne cible pas une ressource existante.")
@@ -170,6 +161,23 @@ def _prepare(db: Session, kind: RequestKind, payload: dict, target_resource_id: 
     return _normalize_storage_update(payload), ResourceType.STORAGE.value, view
 
 
+def _find_duplicate(
+    db: Session,
+    *,
+    kind: RequestKind,
+    project_id: str,
+    target_resource_id: str,
+    payload: dict,
+) -> ResourceRequest | None:
+    statement = select(ResourceRequest).where(
+        ResourceRequest.kind == kind.value,
+        ResourceRequest.status == RequestStatus.PENDING.value,
+        ResourceRequest.project_id == project_id,
+        ResourceRequest.target_resource_id == target_resource_id,
+    )
+    return next((row for row in db.scalars(statement) if row.payload == payload), None)
+
+
 async def submit_request(
     db: Session,
     iam: IamPort,
@@ -191,6 +199,20 @@ async def submit_request(
         required_right=_RIGHT_FOR_KIND[kind],
         resource=view,
     )
+    if target_resource_id is not None:
+        duplicate = _find_duplicate(
+            db,
+            kind=kind,
+            project_id=project_id,
+            target_resource_id=target_resource_id,
+            payload=normalized,
+        )
+        if duplicate is not None:
+            raise AppError(
+                ErrorCode.CONFLICT,
+                "Une demande identique est deja en attente.",
+                details={"request_id": duplicate.id},
+            )
     row = ResourceRequest(
         project_id=project_id,
         author_id=author_id,
@@ -207,7 +229,7 @@ async def submit_request(
         actor_id=author_id,
         action="request.submitted",
         entity_type="request",
-        entity_id=str(row.id),
+        entity_id=row.id,
         data={"kind": kind.value, "project_id": project_id},
     )
     db.commit()
@@ -215,7 +237,7 @@ async def submit_request(
     return row
 
 
-def cancel_request(db: Session, *, author_id: str, request_id: int) -> ResourceRequest:
+def cancel_request(db: Session, *, author_id: str, request_id: str) -> ResourceRequest:
     """Annule une demande en attente. Seul l'auteur peut le faire (R5, F15)."""
     row = _get_request(db, request_id)
     if row.author_id != author_id:
@@ -229,7 +251,7 @@ def cancel_request(db: Session, *, author_id: str, request_id: int) -> ResourceR
         actor_id=author_id,
         action="request.cancelled",
         entity_type="request",
-        entity_id=str(row.id),
+        entity_id=row.id,
     )
     db.commit()
     db.refresh(row)
@@ -259,7 +281,7 @@ async def accept_request(
     *,
     actor_id: str,
     actor_role: GlobalRole,
-    request_id: int,
+    request_id: str,
     note: str | None,
     hypervisor: HypervisorPort,
     storage: StoragePort,
@@ -272,7 +294,7 @@ async def accept_request(
     handler = _HANDLERS.get(row.kind)
     if handler is None:
         raise AppError(
-            ErrorCode.NOT_IMPLEMENTED,
+            ErrorCode.INTERNAL_ERROR,
             f"Aucun traitement technique n'est enregistre pour {row.kind}.",
         )
     context = RequestContext(db=db, request=row, hypervisor=hypervisor, storage=storage)
@@ -286,6 +308,7 @@ async def accept_request(
         raise upstream_unavailable("infrastructure") from None
     except Exception:
         db.rollback()
+        logger.exception("Echec du traitement de la demande %s", request_id)
         raise upstream_unavailable("infrastructure") from None
     row.status = RequestStatus.ACCEPTED.value
     row.admin_note = note
@@ -296,7 +319,7 @@ async def accept_request(
         actor_id=actor_id,
         action="request.accepted",
         entity_type="request",
-        entity_id=str(row.id),
+        entity_id=row.id,
     )
     db.commit()
     db.refresh(row)
@@ -314,7 +337,7 @@ async def refuse_request(
     *,
     actor_id: str,
     actor_role: GlobalRole,
-    request_id: int,
+    request_id: str,
     note: str | None,
     notifications: NotificationsPort,
 ) -> ResourceRequest:
@@ -331,7 +354,7 @@ async def refuse_request(
         actor_id=actor_id,
         action="request.refused",
         entity_type="request",
-        entity_id=str(row.id),
+        entity_id=row.id,
     )
     db.commit()
     db.refresh(row)
@@ -344,30 +367,73 @@ async def refuse_request(
     return row
 
 
-def get_request(db: Session, *, actor_id: str, actor_role: GlobalRole, request_id: int) -> ResourceRequest:
-    """Retourne une demande visible par son auteur ou par un administrateur."""
+async def get_request(
+    db: Session, iam: IamPort, *, actor_id: str, actor_role: GlobalRole, request_id: str
+) -> ResourceRequest:
+    """Retourne une demande visible par son auteur, un membre du projet ou un administrateur."""
     row = _get_request(db, request_id)
-    if actor_role != GlobalRole.ADMIN and row.author_id != actor_id:
+    if actor_role == GlobalRole.ADMIN or row.author_id == actor_id:
+        return row
+    if row.project_id not in await iam.list_projects(actor_id):
         raise AppError(ErrorCode.FORBIDDEN, "Cette demande ne vous est pas accessible.")
     return row
 
 
-def list_requests(
+async def list_requests(
     db: Session,
+    iam: IamPort,
     *,
     actor_id: str,
     actor_role: GlobalRole,
     params: PageParams,
     status: RequestStatus | None = None,
+    kind: RequestKind | None = None,
+    project_id: str | None = None,
+    author_id: str | None = None,
 ) -> tuple[list[ResourceRequest], int]:
-    """Liste paginee. Un administrateur voit tout, un utilisateur voit les siennes."""
-    statement = select(ResourceRequest).order_by(ResourceRequest.created_at.desc())
-    if actor_role != GlobalRole.ADMIN:
-        statement = statement.where(ResourceRequest.author_id == actor_id)
+    """Liste paginee. Un administrateur voit tout, un utilisateur voit ses demandes et ses projets."""
+    is_admin = actor_role == GlobalRole.ADMIN
+    if author_id is not None and not is_admin:
+        raise AppError(ErrorCode.FORBIDDEN, "Le filtre author_id est reserve aux administrateurs.")
+    member_ids: set[str] = set() if is_admin else set(await iam.list_projects(actor_id))
+    if project_id is not None:
+        _require_project(db, project_id)
+        if not is_admin and project_id not in member_ids:
+            raise AppError(ErrorCode.FORBIDDEN, "Ce projet est hors de votre perimetre.")
+    statement = select(ResourceRequest)
+    if not is_admin:
+        statement = statement.where(
+            or_(
+                ResourceRequest.author_id == actor_id,
+                ResourceRequest.project_id.in_(member_ids or {"-"}),
+            )
+        )
+    if project_id is not None:
+        statement = statement.where(ResourceRequest.project_id == project_id)
+    if author_id is not None:
+        statement = statement.where(ResourceRequest.author_id == author_id)
     if status is not None:
         statement = statement.where(ResourceRequest.status == status.value)
+    if kind is not None:
+        statement = statement.where(ResourceRequest.kind == kind.value)
+    statement = statement.order_by(ResourceRequest.created_at.desc(), ResourceRequest.id.desc())
     rows, total = paginate(db, statement, params)
     return list(rows), total
+
+
+def _vm_spec_from_payload(name: str, payload: dict) -> VmSpec:
+    config = payload.get("configuration") or payload
+    return VmSpec(
+        name=name,
+        ram_gb=config["ram_gb"],
+        vcpu=config["vcpu"],
+        vram_gb=config["vram_gb"],
+        ssd_gb=config["ssd_gb"],
+    )
+
+
+def _spec_configuration(payload: dict) -> dict:
+    return dict(payload.get("configuration") or payload)
 
 
 async def refresh_pending_vm_creates(
@@ -386,15 +452,21 @@ async def refresh_pending_vm_creates(
         ResourceRequest.kind == RequestKind.VM_CREATE.value,
         ResourceRequest.status == RequestStatus.PENDING.value,
     )
+    configuration = {
+        "ram_gb": pack.ram_gb,
+        "vcpu": pack.vcpu,
+        "vram_gb": pack.vram_gb,
+        "ssd_gb": pack.ssd_gb,
+    }
     touched: list[ResourceRequest] = []
     for row in db.scalars(statement):
         if row.payload.get("pack_id") != pack.id:
             continue
         updated = dict(row.payload)
-        updated["ram"] = pack.ram
-        updated["cpu"] = pack.cpu
-        updated["vram"] = pack.vram
-        updated["ssd"] = pack.ssd
+        if "configuration" in updated:
+            updated["configuration"] = configuration
+        else:
+            updated.update(configuration)
         row.payload = updated
         row.updated_at = utcnow()
         record_audit(
@@ -402,7 +474,7 @@ async def refresh_pending_vm_creates(
             actor_id=actor_id,
             action="request.pack_refreshed",
             entity_type="request",
-            entity_id=str(row.id),
+            entity_id=row.id,
             data={"pack_id": pack.id},
         )
         touched.append(row)
@@ -421,10 +493,9 @@ async def refresh_pending_vm_creates(
 async def handle_vm_create(context: RequestContext) -> None:
     """Cree la VM via l'hyperviseur puis l'enregistre dans le projet de la demande."""
     payload = context.request.payload
+    spec = _vm_spec_from_payload(payload["name"], payload)
     try:
-        ref = await context.hypervisor.create_vm(
-            VmSpec(payload["name"], payload["ram"], payload["cpu"], payload["vram"], payload["ssd"])
-        )
+        ref = await context.hypervisor.create_vm(spec)
     except HypervisorUnavailable:
         raise upstream_unavailable("Hyperviseur") from None
     context.db.add(
@@ -432,28 +503,31 @@ async def handle_vm_create(context: RequestContext) -> None:
             id=ref.vm_id,
             origin_project_id=context.request.project_id,
             name=payload["name"],
-            ram=payload["ram"],
-            cpu=payload["cpu"],
-            vram=payload["vram"],
-            ssd=payload["ssd"],
+            ip_address=ref.ip_address,
+            ram_gb=spec.ram_gb,
+            vcpu=spec.vcpu,
+            vram_gb=spec.vram_gb,
+            ssd_gb=spec.ssd_gb,
             pack_id=payload.get("pack_id"),
             state=VmState.STOPPED.value,
         )
     )
+    context.request.target_resource_type = ResourceType.VM.value
+    context.request.target_resource_id = ref.vm_id
 
 
 async def handle_vm_update(context: RequestContext) -> None:
-    """Applique les caracteristiques demandees, sans en inventer d'autres (R3)."""
+    """Applique la configuration complete demandee, sans en inventer d'autres (R3)."""
     vm = context.db.get(Vm, context.request.target_resource_id)
     if vm is None:
         raise AppError(ErrorCode.NOT_FOUND, "VM introuvable.")
-    for field in ("ram", "cpu", "vram", "ssd"):
-        value = context.request.payload.get(field)
-        if value is not None:
-            setattr(vm, field, value)
+    configuration = _spec_configuration(context.request.payload)
+    for field, value in configuration.items():
+        setattr(vm, field, value)
     try:
         await context.hypervisor.update_vm(
-            VmRef(vm.id), VmSpec(vm.name, vm.ram, vm.cpu, vm.vram, vm.ssd)
+            VmRef(vm.id),
+            VmSpec(vm.name, vm.ram_gb, vm.vcpu, vm.vram_gb, vm.ssd_gb),
         )
     except HypervisorUnavailable:
         raise upstream_unavailable("Hyperviseur") from None
@@ -463,7 +537,9 @@ async def handle_storage_create(context: RequestContext) -> None:
     """Cree le stockage via le groupe Stockage puis l'enregistre dans le projet."""
     payload = context.request.payload
     try:
-        ref = await context.storage.create_storage(StorageSpec(payload["name"], payload["size"]))
+        ref = await context.storage.create_storage(
+            StorageSpec(name=payload["name"], size_gb=payload["size_gb"])
+        )
     except StorageUnavailable:
         raise upstream_unavailable("Stockage") from None
     context.db.add(
@@ -471,10 +547,13 @@ async def handle_storage_create(context: RequestContext) -> None:
             id=ref.storage_id,
             origin_project_id=context.request.project_id,
             name=payload["name"],
-            size=payload["size"],
+            ip_address=ref.ip_address,
+            size_gb=payload["size_gb"],
             state=StorageState.AVAILABLE.value,
         )
     )
+    context.request.target_resource_type = ResourceType.STORAGE.value
+    context.request.target_resource_id = ref.storage_id
 
 
 async def handle_storage_update(context: RequestContext) -> None:
@@ -482,9 +561,9 @@ async def handle_storage_update(context: RequestContext) -> None:
     storage = context.db.get(Storage, context.request.target_resource_id)
     if storage is None:
         raise AppError(ErrorCode.NOT_FOUND, "Stockage introuvable.")
-    storage.size = context.request.payload["size"]
+    storage.size_gb = context.request.payload["size_gb"]
     try:
-        await context.storage.resize(StorageRef(storage.id), storage.size)
+        await context.storage.resize(StorageRef(storage.id), storage.size_gb)
     except StorageUnavailable:
         raise upstream_unavailable("Stockage") from None
 

@@ -5,23 +5,27 @@ on rehydrate le mock IAM depuis la base metier : les projets et les droits survi
 ainsi a un redemarrage du processus.
 """
 
+import logging
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.api.v1.router import router as v1_router
+from app.application.ports.decision import Refuse, ServiceIndisponible
 from app.core.database import SessionLocal, get_db
-from app.core.dependencies import get_iam
+from app.core.dependencies import get_decision, get_iam
 from app.core.errors import (
     ErrorCode,
     error_responses,
     register_exception_handlers,
     upstream_unavailable,
 )
+from app.core.settings import get_settings
 from app.shared.models import (  # noqa: F401
     audit,
     identities,
@@ -35,6 +39,7 @@ from app.shared.models import (  # noqa: F401
 )
 from app.shared.models.projects import Membership, Project
 from app.shared.models.rights import RightModel
+from app.shared.policies.access import brancher_decision
 from app.shared.policies.rights import membership_rights
 from app.shared.seed.seeder import seed_default_packs, seed_default_profiles, seed_rights
 
@@ -115,3 +120,43 @@ def ready(db: Session = Depends(get_db)) -> ReadinessOut:
 
 
 app.include_router(v1_router)
+
+
+# LE SERVICE DE DECISION EST BRANCHE AU DEMARRAGE, une fois. `authorize` le
+# retrouve par la — voir le commentaire de `access.py` sur ce compromis.
+brancher_decision(get_decision)
+
+# ON LE DIT FORT AU DEMARRAGE. Un backend qui ne compte aucun quota doit
+# l annoncer, pas le taire : « off » est un etat de transition, pas un reglage.
+_reglage = get_settings().decision_backend
+if _reglage == "off":
+    logging.getLogger("app").warning(
+        "DECISION_BACKEND=off : AUCUNE decision IAM n est demandee et AUCUN quota "
+        "n est compte. A poser sur « gandal » avant la mise en service.")
+elif _reglage == "fake":
+    logging.getLogger("app").warning(
+        "DECISION_BACKEND=fake : quotas en MEMOIRE, remis a zero a chaque "
+        "redemarrage. Developpement seulement.")
+
+
+@app.exception_handler(Refuse)
+async def _refus_de_decision(_: Request, exc: Refuse) -> JSONResponse:
+    """Traduit un refus du service de decision en RFC 9457 (`problem+json`).
+
+    Sans ce gestionnaire, un refus de quota sort en 500 et l'utilisateur lit
+    « erreur interne » la ou IAM avait ecrit « il vous reste 2 vCPU sur 4 ». Le
+    motif voyage aussi : un client doit pouvoir distinguer « reessaie plus tard »
+    (503) de « ne reessaie pas » (403).
+    """
+    return JSONResponse(
+        status_code=exc.statut,
+        media_type="application/problem+json",
+        content={
+            "type": f"https://gandal.internal/problemes/{exc.motif or 'refus'}",
+            "title": "Service de decision indisponible"
+                     if isinstance(exc, ServiceIndisponible) else "Refuse",
+            "status": exc.statut,
+            "detail": exc.explication or str(exc),
+            "motif": exc.motif,
+        },
+    )

@@ -28,6 +28,7 @@ from app.shared.models.projects import Project
 from app.shared.models.requests import ResourceRequest
 from app.shared.models.vms import Vm
 from app.shared.policies.access import ResourceView, authorize
+from app.shared.policies.access import resolveur as _resolveur_decision
 from app.shared.time import utcnow
 
 logger = logging.getLogger(__name__)
@@ -243,6 +244,29 @@ def _require_pending(row: ResourceRequest) -> None:
         raise AppError(ErrorCode.INVALID_STATE, "Seule une demande en attente peut etre traitee.")
 
 
+def _tailles(payload: dict) -> dict[str, int]:
+    """La taille demandee, quelle que soit la forme du payload normalise.
+
+    « _normalize_vm_create » rend soit `{"configuration": {...}}` (configuration
+    explicite), soit les champs A PLAT (resolus depuis un pack). Les deux sont
+    lues ici, parce qu une seule des deux formes donnerait un quota nul sur la
+    moitie des demandes — et un quota nul ne refuse rien, il compte faux.
+    """
+    source = payload.get("configuration") or payload
+    return {cle: int(source.get(cle, 0) or 0)
+            for cle in ("ram_gb", "vcpu", "vram_gb", "ssd_gb")}
+
+
+def _ressources_de_quota(payload: dict) -> dict[str, int]:
+    t = _tailles(payload)
+    r = {"vm_count": 1, "vcpu": t["vcpu"], "ram_gb": t["ram_gb"],
+         "disk_gb": t["ssd_gb"]}
+    if t["vram_gb"]:
+        # La VRAM se compte en Mio dans IAM : « 2 Gio » s ecrit 2048.
+        r["gpu_mem_mb"] = t["vram_gb"] * 1024
+    return {k: v for k, v in r.items() if v}
+
+
 async def accept_request(
     db: Session,
     *,
@@ -264,18 +288,88 @@ async def accept_request(
             f"Aucun traitement technique n'est enregistre pour {row.kind}.",
         )
     context = RequestContext(db=db, request=row, hypervisor=hypervisor)
-    try:
-        await handler(context)
-    except AppError:
-        db.rollback()
-        raise
-    except HypervisorUnavailable:
-        db.rollback()
-        raise upstream_unavailable("infrastructure") from None
-    except Exception:
-        db.rollback()
-        logger.exception("Echec du traitement de la demande %s", request_id)
-        raise upstream_unavailable("infrastructure") from None
+
+    # ─── LE QUOTA EST RETENU ICI, ET NULLE PART AILLEURS ────────────────────
+    #
+    # C est le moment ou la ressource vient a l existence. Le retenir au DEPOT de
+    # la demande le bloquerait pendant les jours ou elle attend un administrateur,
+    # et dix demandes en attente epuiseraient un quota sans qu aucune VM
+    # n existe. On decide tot (dans `submit_request`, par `authorize`) et on
+    # compte tard.
+    #
+    # LA DECISION EST REDEMANDEE, au nom de l AUTEUR : entre le depot et
+    # maintenant, son role a pu expirer, son projet etre archive, une politique
+    # changer. Accepter sur la foi d une decision de trois jours applique un
+    # droit perime.
+    decision = _resolveur_decision()
+    if decision is not None and row.kind == RequestKind.VM_CREATE.value:
+        await decision.autoriser(
+            sujet=row.author_id, action="vm:create",
+            ressource={"type": "vm", "id": str(row.payload.get("name") or row.id),
+                       "projet": row.project_id},
+            contexte={"vcpu": _tailles(row.payload)["vcpu"],
+                      "ram_gb": _tailles(row.payload)["ram_gb"],
+                      "disk_gb": _tailles(row.payload)["ssd_gb"]})
+        async with decision.transaction(
+                sujet=row.author_id, projet=row.project_id,
+                ressources=_ressources_de_quota(row.payload)) as jeton:
+            try:
+                await handler(context)
+            except AppError:
+                db.rollback()
+                raise
+            except HypervisorUnavailable:
+                db.rollback()
+                raise upstream_unavailable("infrastructure") from None
+            except Exception:
+                db.rollback()
+                logger.exception("Echec du traitement de la demande %s", request_id)
+                raise upstream_unavailable("infrastructure") from None
+            # CONFIRMER APRES le traitement : confirmer d abord compterait une VM
+            # qu un echec de l hyperviseur laisserait inexistante. Et si le corps
+            # leve, la sortie du bloc LIBERE la reservation.
+            await decision.confirmer(
+                jeton, id_ressource=str(row.target_resource_id or row.id),
+                type_ressource="vm")
+    elif decision is not None and row.kind == RequestKind.VM_UPDATE.value:
+        await decision.autoriser(
+            sujet=row.author_id, action="vm:update",
+            ressource={"type": "vm", "id": str(row.target_resource_id),
+                       "projet": row.project_id},
+            contexte={"vcpu": _tailles(row.payload)["vcpu"],
+                      "ram_gb": _tailles(row.payload)["ram_gb"],
+                      "disk_gb": _tailles(row.payload)["ssd_gb"]})
+        try:
+            await handler(context)
+        except AppError:
+            db.rollback()
+            raise
+        except Exception:
+            db.rollback()
+            logger.exception("Echec du traitement de la demande %s", request_id)
+            raise upstream_unavailable("infrastructure") from None
+        t = _tailles(row.payload)
+        # `redimensionner` compte l ECART, pas la taille entiere : c est IAM qui
+        # soustrait, dans sa transaction.
+        await decision.redimensionner(
+            sujet=row.author_id, id_ressource=str(row.target_resource_id),
+            quantites={"vcpu": t["vcpu"], "ram_gb": t["ram_gb"],
+                       "disk_gb": t["ssd_gb"]})
+    else:
+        # AUCUN service de decision branche : exactement le chemin d avant la
+        # greffe, traitement d erreur compris.
+        try:
+            await handler(context)
+        except AppError:
+            db.rollback()
+            raise
+        except HypervisorUnavailable:
+            db.rollback()
+            raise upstream_unavailable("infrastructure") from None
+        except Exception:
+            db.rollback()
+            logger.exception("Echec du traitement de la demande %s", request_id)
+            raise upstream_unavailable("infrastructure") from None
     row.status = RequestStatus.ACCEPTED.value
     row.admin_note = note
     row.decided_at = utcnow()

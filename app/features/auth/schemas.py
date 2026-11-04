@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.application.ports.iam import AuthToken, GlobalRole, Identity
 
@@ -6,6 +6,22 @@ from app.application.ports.iam import AuthToken, GlobalRole, Identity
 class LoginIn(BaseModel):
     email: str = Field(min_length=3)
     password: str = Field(min_length=1)
+
+
+class RegisterIn(BaseModel):
+    email: str = Field(
+        min_length=3,
+        max_length=254,
+        pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$",
+    )
+    password: str = Field(min_length=12)
+    first_name: str = Field(min_length=1, max_length=100)
+    last_name: str = Field(min_length=1, max_length=100)
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def strip_email(cls, value: object) -> object:
+        return value.strip() if isinstance(value, str) else value
 
 
 class UserUpdateIn(BaseModel):

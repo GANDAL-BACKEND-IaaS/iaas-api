@@ -13,7 +13,8 @@ from app.features.auth.dependencies import get_current_identity, require_admin
 from app.features.profiles import service
 from app.features.profiles.schemas import ProfileCreateIn, ProfileOut, ProfileUpdateIn, RightOut
 
-router = APIRouter(prefix="/admin")
+router = APIRouter(prefix="/admin", tags=["profils & droits (consultation)"])
+admin_router = APIRouter(prefix="/admin", tags=["admin: gestion des profils"])
 
 _READ = (ErrorCode.UNAUTHORIZED, ErrorCode.VALIDATION_ERROR)
 _WRITE = (
@@ -37,7 +38,6 @@ def _translate(exc: service.ProfileError) -> AppError:
 @router.get(
     "/rights",
     response_model=list[RightOut],
-    tags=["profils & droits (consultation)"],
     operation_id="list_rights",
     summary="Lister le catalogue de droits",
     responses=error_responses(*_READ),
@@ -51,7 +51,6 @@ def list_rights(db: Session = Depends(get_db)) -> list[RightOut]:
 @router.get(
     "/profiles",
     response_model=Page[ProfileOut],
-    tags=["profils & droits (consultation)"],
     operation_id="list_profiles",
     summary="Lister les profils de droits",
     responses=error_responses(*_READ),
@@ -67,11 +66,10 @@ def list_profiles(
     return Page.build([ProfileOut.model_validate(item) for item in chunk], len(items), params)
 
 
-@router.post(
+@admin_router.post(
     "/profiles",
     response_model=ProfileOut,
     status_code=status.HTTP_201_CREATED,
-    tags=["admin: gestion des profils"],
     operation_id="create_profile",
     summary="Creer un profil",
     responses=error_responses(*_WRITE),
@@ -87,10 +85,9 @@ def create_profile(body: ProfileCreateIn, db: Session = Depends(get_db)) -> Prof
         raise _translate(exc) from None
 
 
-@router.patch(
+@admin_router.patch(
     "/profiles/{profile_id}",
     response_model=ProfileOut,
-    tags=["admin: gestion des profils"],
     operation_id="update_profile",
     summary="Modifier un profil",
     responses=error_responses(*_WRITE),
@@ -108,10 +105,9 @@ def update_profile(
         raise _translate(exc) from None
 
 
-@router.delete(
+@admin_router.delete(
     "/profiles/{profile_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    tags=["admin: gestion des profils"],
     operation_id="delete_profile",
     summary="Supprimer un profil",
     responses=error_responses(ErrorCode.UNAUTHORIZED, ErrorCode.FORBIDDEN, ErrorCode.NOT_FOUND),

@@ -24,6 +24,7 @@ from app.shared.enums import RequestKind, RequestStatus
 register_default_handlers()
 
 router = APIRouter(prefix="/requests", tags=["demandes"])
+admin_router = APIRouter(prefix="/requests", tags=["admin: traitement des demandes"])
 
 _AUTH = (ErrorCode.UNAUTHORIZED,)
 _READ = (
@@ -95,7 +96,7 @@ async def get_request(
     return RequestOut.model_validate(row)
 
 
-@router.post(
+@admin_router.post(
     "/{request_id}/cancel",
     response_model=RequestOut,
     operation_id="cancel_request",
@@ -118,6 +119,7 @@ def cancel_request(
     response_model=RequestOut,
     operation_id="accept_request",
     summary="Accepter une demande",
+    tags=["admin: traitement des demandes"],
     description="Reserve a un administrateur. La demande n'est pas modifiee (F16, R3).",
     responses=error_responses(*_DECIDE),
 )
@@ -144,11 +146,12 @@ async def accept_request(
     return RequestOut.model_validate(row)
 
 
-@router.post(
+@admin_router.post(
     "/{request_id}/refuse",
     response_model=RequestOut,
     operation_id="refuse_request",
     summary="Refuser une demande",
+    tags=["admin: traitement des demandes"],
     description="Reserve a un administrateur. La remarque est optionnelle (R4).",
     responses=error_responses(*_DECIDE),
 )

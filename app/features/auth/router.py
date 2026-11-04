@@ -31,18 +31,75 @@ from app.core.dependencies import (
 )
 from app.core.errors import ErrorCode, error_responses
 from app.features.auth import service
-from app.features.auth.dependencies import get_current_identity
+from app.features.auth.dependencies import get_current_identity, require_admin
 from app.features.auth.schemas import (
     IdentityOut,
     LoginIn,
     PasswordChangeIn,
+    RegisterIn,
     TokenOut,
     UserUpdateIn,
 )
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+admin_router = APIRouter(prefix="/admin", tags=["admin: gestion des comptes"])
 
 _AUTH = (ErrorCode.UNAUTHORIZED, ErrorCode.VALIDATION_ERROR)
+
+
+@router.post(
+    "/register",
+    response_model=TokenOut,
+    status_code=status.HTTP_201_CREATED,
+    operation_id="register",
+    summary="Créer un compte",
+    responses=error_responses(ErrorCode.CONFLICT, ErrorCode.VALIDATION_ERROR),
+)
+async def register(
+    body: RegisterIn,
+    iam: IamPort = Depends(get_iam),
+    decode: Callable[[str], Identity] = Depends(get_token_decoder),
+    db: Session = Depends(get_db),
+) -> TokenOut:
+    """Cree un compte IAM, conserve sa reference et renvoie le jeton emis."""
+    try:
+        token = await iam.register_user(
+            body.email, body.password, body.first_name, body.last_name
+        )
+    except EmailAlreadyUsed:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Cette adresse email est deja utilisee") from None
+    service.ensure_reference(db, decode(token.access_token))
+    return TokenOut.of(token)
+
+
+@admin_router.post(
+    "/admins",
+    response_model=IdentityOut,
+    status_code=status.HTTP_201_CREATED,
+    operation_id="create_admin",
+    summary="Créer un administrateur",
+    responses=error_responses(
+        ErrorCode.UNAUTHORIZED,
+        ErrorCode.FORBIDDEN,
+        ErrorCode.CONFLICT,
+        ErrorCode.VALIDATION_ERROR,
+    ),
+)
+async def create_admin(
+    body: RegisterIn,
+    iam: IamPort = Depends(get_iam),
+    db: Session = Depends(get_db),
+    _: Identity = Depends(require_admin),
+) -> IdentityOut:
+    """Cree un compte admin dans l'IAM et conserve sa reference locale."""
+    try:
+        identity = await iam.create_admin(
+            body.email, body.password, body.first_name, body.last_name
+        )
+    except EmailAlreadyUsed:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Cette adresse email est deja utilisee") from None
+    service.ensure_reference(db, identity)
+    return IdentityOut.of(identity)
 
 
 @router.post(

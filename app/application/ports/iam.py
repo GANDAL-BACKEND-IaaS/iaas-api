@@ -61,6 +61,18 @@ class UnknownRight(IamError): ...
 
 class IamPort(ABC):
     @abstractmethod
+    async def register_user(
+        self, email: str, password: str, first_name: str, last_name: str
+    ) -> AuthToken:
+        """Cree un compte utilisateur et renvoie le jeton emis par l'IAM."""
+
+    @abstractmethod
+    async def create_admin(
+        self, email: str, password: str, first_name: str, last_name: str
+    ) -> Identity:
+        """Cree un compte administrateur avec le role global admin."""
+
+    @abstractmethod
     async def login(self, email: str, password: str) -> AuthToken:
         """Jeton contenant l'identité complète et le rôle global."""
 

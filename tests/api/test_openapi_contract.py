@@ -39,3 +39,28 @@ def test_error_component_shape_is_stable():
     example = sample["content"]["application/json"]["examples"]["upstream_unavailable"]["value"]
     assert example["error"]["code"] == "upstream_unavailable"
     assert "message" in example["error"]
+
+
+def test_admin_operations_are_grouped_under_admin_tags():
+    schema = app.openapi()
+    admin_operations = {
+        "create_admin",
+        "create_profile",
+        "update_profile",
+        "delete_profile",
+        "create_pack",
+        "update_pack",
+        "delete_pack",
+        "accept_request",
+        "refuse_request",
+    }
+
+    operations = {
+        operation["operationId"]: operation
+        for methods in schema["paths"].values()
+        for method, operation in methods.items()
+        if method in {"get", "post", "patch", "put", "delete"}
+    }
+
+    for operation_id in admin_operations:
+        assert any(tag.startswith("admin:") for tag in operations[operation_id]["tags"])

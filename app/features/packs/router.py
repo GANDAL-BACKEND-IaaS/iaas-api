@@ -14,6 +14,7 @@ from app.features.packs import service
 from app.features.packs.schemas import PackCreateIn, PackOut, PackUpdateIn
 
 router = APIRouter(tags=["packs"])
+admin_router = APIRouter(tags=["admin: gestion des packs"])
 
 _ADMIN = (
     ErrorCode.UNAUTHORIZED,
@@ -69,12 +70,13 @@ def get_pack(
     return PackOut.model_validate(service.get_pack(db, pack_id))
 
 
-@router.post(
+@admin_router.post(
     "/admin/packs",
     response_model=PackOut,
     status_code=status.HTTP_201_CREATED,
     operation_id="create_pack",
     summary="Creer un pack",
+    tags=["admin: gestion des packs"],
     responses=error_responses(*_ADMIN),
 )
 def create_pack(
@@ -86,11 +88,12 @@ def create_pack(
     return PackOut.model_validate(service.create_pack(db, body))
 
 
-@router.patch(
+@admin_router.patch(
     "/admin/packs/{pack_id}",
     response_model=PackOut,
     operation_id="update_pack",
     summary="Modifier un pack",
+    tags=["admin: gestion des packs"],
     responses=error_responses(*_ADMIN),
 )
 async def update_pack(
@@ -106,11 +109,12 @@ async def update_pack(
     )
 
 
-@router.delete(
+@admin_router.delete(
     "/admin/packs/{pack_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     operation_id="delete_pack",
     summary="Supprimer un pack",
+    tags=["admin: gestion des packs"],
     responses=error_responses(*_ADMIN),
 )
 def delete_pack(

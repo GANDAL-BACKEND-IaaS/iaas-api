@@ -32,7 +32,7 @@ def _hash(password: str) -> str:
 
 def stable_user_id(email: str) -> str:
     """Identifiant deterministe d'un compte de demo : stable entre deux redemarrages."""
-    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"iaas:user:{email.lower()}"))
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"iaas:user:{email.strip().lower()}"))
 
 
 @dataclass
@@ -60,9 +60,10 @@ class FakeIamClient(IamPort):
         self._users: dict[str, _UserRecord] = {}
         self._projects: dict[str, _ProjectRecord] = {}
 
-    # ---- hors port : préparer des données (l'inscription est gérée par l'IAM réel) ----
+    # ---- hors port : préparer des données de test ou de démonstration ----
     def add_user(self, email: str, password: str, first_name: str = "", last_name: str = "",
                  role: GlobalRole = GlobalRole.USER, user_id: str | None = None) -> Identity:
+        email = self._normalize_email(email)
         self._ensure_email_free(email)
         identity = Identity(user_id or stable_user_id(email), email, first_name, last_name, role)
         self._users[identity.user_id] = _UserRecord(identity, _hash(password))
@@ -85,7 +86,33 @@ class FakeIamClient(IamPort):
         self._projects[project_id] = _ProjectRecord(owner_id=owner_id, grants=known)
 
     # ---- port ----
+    async def register_user(
+        self, email: str, password: str, first_name: str, last_name: str
+    ) -> AuthToken:
+        identity = self.add_user(
+            email,
+            password,
+            first_name,
+            last_name,
+            role=GlobalRole.USER,
+            user_id=str(uuid.uuid4()),
+        )
+        return self._issue_token(identity)
+
+    async def create_admin(
+        self, email: str, password: str, first_name: str, last_name: str
+    ) -> Identity:
+        return self.add_user(
+            email,
+            password,
+            first_name,
+            last_name,
+            role=GlobalRole.ADMIN,
+            user_id=str(uuid.uuid4()),
+        )
+
     async def login(self, email: str, password: str) -> AuthToken:
+        email = self._normalize_email(email)
         record = next((r for r in self._users.values() if r.identity.email == email), None)
         if record is None or record.password_hash != _hash(password):
             raise InvalidCredentials()
@@ -96,11 +123,12 @@ class FakeIamClient(IamPort):
 
     async def update_user(self, user_id: str, changes: UserUpdate) -> AuthToken:
         record = self._get_user(user_id)
-        if changes.email and changes.email != record.identity.email:
-            self._ensure_email_free(changes.email)
+        email = self._normalize_email(changes.email) if changes.email is not None else None
+        if email is not None and email != record.identity.email:
+            self._ensure_email_free(email)
         record.identity = replace(
             record.identity,
-            email=changes.email if changes.email is not None else record.identity.email,
+            email=email if email is not None else record.identity.email,
             first_name=changes.first_name if changes.first_name is not None else record.identity.first_name,
             last_name=changes.last_name if changes.last_name is not None else record.identity.last_name,
         )
@@ -179,9 +207,9 @@ class FakeIamClient(IamPort):
 
     async def find_user_id_by_email(self, email: str) -> str | None:
         """Cherche un compte par email, sans tenir compte de la casse."""
-        needle = email.strip().lower()
+        needle = self._normalize_email(email)
         for record in self._users.values():
-            if record.identity.email.strip().lower() == needle:
+            if record.identity.email == needle:
                 return record.identity.user_id
         return None
 
@@ -212,5 +240,10 @@ class FakeIamClient(IamPort):
             raise ProjectNotFound(project_id) from None
 
     def _ensure_email_free(self, email: str) -> None:
-        if any(r.identity.email == email for r in self._users.values()):
+        normalized_email = self._normalize_email(email)
+        if any(r.identity.email == normalized_email for r in self._users.values()):
             raise EmailAlreadyUsed(email)
+
+    @staticmethod
+    def _normalize_email(email: str) -> str:
+        return email.strip().lower()

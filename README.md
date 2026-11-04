@@ -26,7 +26,9 @@ Le backend ne realise aucune action technique. Chaque dependance externe est un 
 ```
 app/
   main.py                      # FastAPI, seed, handlers d'erreurs
-  api/v1/router.py             # Prefixe /api/v1
+  api/v1/router.py             # Prefixe /api/v1 et assemblage
+  api/v1/admin.py              # Endpoints reserves aux administrateurs
+  api/v1/endpoints.py          # Endpoints generaux
   core/                        # Config, base, erreurs, pagination, audit, jetons
   application/ports/           # Contrats IAM, hyperviseur, reseau, stockage, DNS, notifications
   infrastructure/              # Mocks de ces ports
@@ -79,6 +81,8 @@ Toutes les routes sont sous `/api/v1`.
 
 - **Identifiants UUID partout** : `profile_id` et `request_id` sont aussi des chaines UUID, alors que le document de contrat les montre comme des entiers. C'est le seul ecart volontaire ; il est isole dans les schemas et les modeles pour pouvoir revenir au contrat si necessaire.
 - **Unicite du nom de projet** : le nom est unique par proprietaire, a la creation comme au renommage (`409` en cas de doublon). Le proprietaire est le perimetre naturel puisqu'il est le seul a pouvoir partager entre ses projets.
+- **Inscription** : `POST /api/v1/auth/register` accepte `email`, `password`, `first_name` et `last_name`, cree un compte `user` via le mock IAM, conserve uniquement sa reference locale et renvoie le jeton (`201`). Le mot de passe doit comporter au moins 12 caracteres ; l'email deja utilise renvoie `409`.
+- **Administrateurs** : `POST /api/v1/admin/admins` est reserve a un administrateur connecte. Il accepte les memes champs que l'inscription, cree un compte `admin` via le mock IAM et conserve uniquement sa reference locale. Il renvoie l'identite (`201`), pas le jeton du nouvel administrateur.
 - **Partages** : `GET /api/v1/shares` et `GET /api/v1/shares/{share_id}` sont des extensions de lecture. Un administrateur global ne voit pas les partages des utilisateurs : seul le membership d'un projet concerne donne acces.
 - **Invitations** : `POST /api/v1/projects/{project_id}/invitations` accepte soit `email`, soit `invitee_id`, mais pas les deux. L'email est normalise puis resolu aupres de l'IAM ; un email inconnu renvoie `404`. La base conserve l'identifiant IAM canonique et un instantane `invitee_email` pour l'affichage.
 - **Packs** : l'identifiant est un UUID opaque ; le nom est unique.

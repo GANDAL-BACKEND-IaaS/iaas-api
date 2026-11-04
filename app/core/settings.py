@@ -1,9 +1,12 @@
+"""Configuration lue depuis l'environnement et le fichier .env."""
+
 from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    """Parametres de l'application. Les valeurs d'environnement ecrasent les defauts."""
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     iam_jwt_secret: str = "dev-secret-change-me"
@@ -15,4 +18,5 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
+    """Retourne la configuration memorisee pour le processus."""
     return Settings()

@@ -11,7 +11,7 @@ from app.core.settings import get_settings
 from app.features.profiles import service
 from app.infrastructure.iam.fake_iam import FakeIamClient
 from app.main import app
-from app.shared.models import identities, rights  # noqa: F401
+from app.shared import models as _models  # noqa: F401
 from app.shared.models.base import Base
 from app.shared.seed.loader import load_rights_catalog
 from app.shared.seed.seeder import seed_default_profiles, seed_rights
@@ -58,8 +58,8 @@ def test_default_profiles_seeded_once(db):
 async def test_admin_full_crud(client, iam):
     h = await _headers(iam, "root@x.cm")
     created = client.post("/api/v1/admin/profiles", headers=h, json={
-        "name": "Auditeur", "rights": ["vm.view", "storage.view"]}).json()
-    assert created["rights"] == ["storage.view", "vm.view"]
+        "name": "Auditeur", "rights": ["vm.view", "project.invite"]}).json()
+    assert created["rights"] == ["project.invite", "vm.view"]
 
     pid = created["id"]
     patched = client.patch(f"/api/v1/admin/profiles/{pid}", headers=h,
@@ -119,6 +119,6 @@ async def test_non_admin_can_read_but_not_mutate(client, iam, db):
 
 def test_resolve_rights_profile_plus_extras(db):
     lecteur = next(p for p in service.list_profiles(db) if p.name == "Lecteur")
-    assert service.resolve_rights(db, lecteur.id, ["vm.delete"]) == {"vm.view", "storage.view", "vm.delete"}
+    assert service.resolve_rights(db, lecteur.id, ["vm.delete"]) == {"vm.view", "vm.delete"}
     with pytest.raises(service.UnknownRights):
         service.resolve_rights(db, None, ["vm.fly"])

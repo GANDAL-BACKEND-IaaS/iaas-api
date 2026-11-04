@@ -1,0 +1,9 @@
+# Artefacts locaux, caches et binaire de spec : hors perimetre du graphe de code.
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.cursor/
+docs/
+dev.db
+*.pyc

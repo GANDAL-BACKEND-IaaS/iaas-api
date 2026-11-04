@@ -1,0 +1,32 @@
+# Lancement complet : docker compose up --build
+# PostgreSQL devient sain, puis l'API migre, insere le seed et ecoute sur le port 8000.
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: iaas
+      POSTGRES_PASSWORD: iaas
+      POSTGRES_DB: iaas
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U iaas -d iaas"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://iaas:iaas@db:5432/iaas
+      IAM_JWT_SECRET: dev-secret-change-me
+      IAM_SEED_DEMO_USERS: "true"
+    ports:
+      - "8000:8000"
+
+volumes:
+  pgdata:

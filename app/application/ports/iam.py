@@ -36,6 +36,15 @@ class AuthToken:
     token_type: str = "bearer"
 
 
+@dataclass(frozen=True)
+class MemberGrant:
+    """Membre d'un projet tel que le port IAM le connait."""
+
+    user_id: str
+    is_owner: bool
+    rights: frozenset[Right]
+
+
 class IamError(Exception): ...
 class InvalidCredentials(IamError): ...
 class InvalidToken(IamError): ...
@@ -51,6 +60,18 @@ class UnknownRight(IamError): ...
 
 
 class IamPort(ABC):
+    @abstractmethod
+    async def register_user(
+        self, email: str, password: str, first_name: str, last_name: str
+    ) -> AuthToken:
+        """Cree un compte utilisateur et renvoie le jeton emis par l'IAM."""
+
+    @abstractmethod
+    async def create_admin(
+        self, email: str, password: str, first_name: str, last_name: str
+    ) -> Identity:
+        """Cree un compte administrateur avec le role global admin."""
+
     @abstractmethod
     async def login(self, email: str, password: str) -> AuthToken:
         """Jeton contenant l'identité complète et le rôle global."""
@@ -82,9 +103,29 @@ class IamPort(ABC):
         """Remplace les droits d'un membre (hors propriétaire)."""
 
     @abstractmethod
+    async def remove_member(self, user_id: str, project_id: str) -> None:
+        """Retire un membre invite du projet et ses droits."""
+
+    @abstractmethod
+    async def get_user(self, user_id: str) -> Identity:
+        """Retourne l'identite connue de l'IAM, ou leve UserNotFound."""
+
+    @abstractmethod
     async def get_rights(self, user_id: str, project_id: str) -> frozenset[Right]:
         """Droits de l'utilisateur sur le projet. Vide s'il n'est pas membre."""
 
     @abstractmethod
     async def list_projects(self, user_id: str) -> frozenset[str]:
         """Identifiants des projets auxquels l'utilisateur a accès."""
+
+    @abstractmethod
+    async def list_members(self, project_id: str) -> tuple[MemberGrant, ...]:
+        """Membres du projet, proprietaire inclus, avec leurs droits."""
+
+    @abstractmethod
+    async def delete_project(self, project_id: str) -> None:
+        """Oublie le projet et les droits de ses membres."""
+
+    @abstractmethod
+    async def find_user_id_by_email(self, email: str) -> str | None:
+        """Retourne l'identifiant si le compte existe, sinon None."""

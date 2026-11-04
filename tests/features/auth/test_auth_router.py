@@ -26,6 +26,113 @@ def test_login_wrong_credentials(client):
     assert _login(client, email="inconnu@x.cm").status_code == 401
 
 
+def test_register_creates_user_reference_and_returns_usable_token(client, db):
+    response = client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "new@x.cm",
+            "password": "long-enough-password",
+            "first_name": "New",
+            "last_name": "User",
+        },
+    )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert set(payload) == {"access_token", "token_type", "expires_in"}
+    headers = {"Authorization": f"Bearer {payload['access_token']}"}
+    identity = client.get("/api/v1/auth/me", headers=headers)
+    assert identity.status_code == 200 and identity.json()["role"] == "user"
+    assert db.get(UserRef, identity.json()["user_id"]) is not None
+
+
+def test_register_duplicate_email_returns_conflict(client):
+    response = client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": " U@X.CM ",
+            "password": "long-enough-password",
+            "first_name": "New",
+            "last_name": "User",
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "conflict"
+
+
+def test_register_rejects_invalid_email_and_short_password(client):
+    response = client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "invalid",
+            "password": "short",
+            "first_name": "New",
+            "last_name": "User",
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "validation_error"
+
+
+def test_admin_can_create_another_admin(client, iam, db):
+    response = client.post(
+        "/api/v1/admin/admins",
+        headers=_headers(client, "root@x.cm"),
+        json={
+            "email": "new-admin@x.cm",
+            "password": "long-enough-password",
+            "first_name": "New",
+            "last_name": "Admin",
+        },
+    )
+
+    assert response.status_code == 201
+    identity = response.json()
+    assert identity["role"] == "admin"
+    assert db.get(AdminRef, identity["user_id"]) is not None
+    assert db.get(UserRef, identity["user_id"]) is None
+
+    admin_headers = _headers(client, "new-admin@x.cm", "long-enough-password")
+    assert client.post(
+        "/api/v1/admin/profiles",
+        headers=admin_headers,
+        json={"name": "Nouveau profil", "rights": ["vm.view"]},
+    ).status_code == 201
+
+
+def test_only_admin_can_create_another_admin(client):
+    body = {
+        "email": "new-admin@x.cm",
+        "password": "long-enough-password",
+        "first_name": "New",
+        "last_name": "Admin",
+    }
+
+    assert client.post("/api/v1/admin/admins", json=body).status_code == 401
+    response = client.post(
+        "/api/v1/admin/admins", headers=_headers(client), json=body
+    )
+    assert response.status_code == 403
+
+
+def test_create_admin_duplicate_email_returns_conflict(client):
+    response = client.post(
+        "/api/v1/admin/admins",
+        headers=_headers(client, "root@x.cm"),
+        json={
+            "email": "u@x.cm",
+            "password": "long-enough-password",
+            "first_name": "New",
+            "last_name": "Admin",
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "conflict"
+
+
 def test_me_requires_token(client):
     assert client.get("/api/v1/auth/me").status_code == 401
     body = client.get("/api/v1/auth/me", headers=_headers(client)).json()

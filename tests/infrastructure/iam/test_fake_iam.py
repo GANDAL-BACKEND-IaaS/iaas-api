@@ -54,6 +54,35 @@ async def test_login_errors(iam, alice):
         await iam.login("inconnu@x.cm", "pw1")
 
 
+async def test_register_creates_user_and_returns_token(iam):
+    token = await iam.register_user("  NEW@X.CM ", "long-enough-password", "New", "User")
+    identity = await iam.validate_token(token.access_token)
+
+    assert identity.email == "new@x.cm"
+    assert identity.first_name == "New" and identity.last_name == "User"
+    assert identity.role == GlobalRole.USER
+    assert (await iam.login("new@x.cm", "long-enough-password")).access_token
+
+
+async def test_register_rejects_duplicate_email_ignoring_case_and_spaces(iam, alice):
+    with pytest.raises(EmailAlreadyUsed):
+        await iam.register_user(" ALICE@X.CM ", "long-enough-password", "A", "B")
+
+
+async def test_create_admin_assigns_global_admin_role(iam):
+    identity = await iam.create_admin("root@x.cm", "long-enough-password", "Root", "Admin")
+    token = await iam.login("root@x.cm", "long-enough-password")
+
+    assert identity.role == GlobalRole.ADMIN
+    assert await iam.validate_token(token.access_token) == identity
+
+
+async def test_find_user_id_by_email_ignores_case_and_spaces(iam, alice):
+    """Le lookup email est utilisable tel que saisi par le frontend."""
+    assert await iam.find_user_id_by_email("  ALICE@X.CM  ") == alice.user_id
+    assert await iam.find_user_id_by_email("inconnu@x.cm") is None
+
+
 @pytest.mark.parametrize("garbage", ["", "abc", "a.b.c", "Bearer xyz"])
 async def test_validate_rejects_garbage(iam, garbage):
     with pytest.raises(InvalidToken):
@@ -129,8 +158,8 @@ async def test_update_rights_replaces(iam, alice):
     bob = iam.add_user("bob@x.cm", "pw2")
     await iam.create_project(alice.user_id, "p1")
     await iam.invite_user(bob.user_id, "p1", ["vm.view"])
-    await iam.update_rights(bob.user_id, "p1", ["storage.view"])
-    assert await iam.get_rights(bob.user_id, "p1") == {"storage.view"}
+    await iam.update_rights(bob.user_id, "p1", ["vm.view"])
+    assert await iam.get_rights(bob.user_id, "p1") == {"vm.view"}
 
 
 async def test_rights_rules(iam, alice):

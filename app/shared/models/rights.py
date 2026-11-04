@@ -1,7 +1,7 @@
 from sqlalchemy import Column, ForeignKey, String, Table
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.shared.models.base import Base
+from app.shared.models.base import Base, new_id
 
 profile_rights = Table(
     "profile_rights",
@@ -13,6 +13,7 @@ profile_rights = Table(
 
 class RightModel(Base):
     """Droit existant sur la plateforme (catalogue)."""
+
     __tablename__ = "rights"
 
     code: Mapped[str] = mapped_column(String(64), primary_key=True)
@@ -21,9 +22,10 @@ class RightModel(Base):
 
 class ProfileModel(Base):
     """Profil de droits, personnalisable par l'administrateur."""
+
     __tablename__ = "profiles"
 
-    id: Mapped[int] = mapped_column(primary_key=True)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     name: Mapped[str] = mapped_column(String(64), unique=True)
     description: Mapped[str] = mapped_column(String(255), default="")
-    rights: Mapped[list[RightModel]] = relationship(secondary=profile_rights)
+    rights: Mapped[list[RightModel]] = relationship(secondary=profile_rights, lazy="selectin")

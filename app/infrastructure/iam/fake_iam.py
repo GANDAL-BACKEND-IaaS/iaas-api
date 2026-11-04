@@ -12,6 +12,7 @@ from app.application.ports.iam import (
     IamPort,
     Identity,
     InvalidCredentials,
+    MemberGrant,
     NotAMember,
     OwnerRightsImmutable,
     ProjectAlreadyExists,
@@ -27,6 +28,11 @@ from app.core.tokens import decode_token, encode_token
 def _hash(password: str) -> str:
     # Mock uniquement : un vrai IAM utilise bcrypt/argon2.
     return hashlib.sha256(password.encode()).hexdigest()
+
+
+def stable_user_id(email: str) -> str:
+    """Identifiant deterministe d'un compte de demo : stable entre deux redemarrages."""
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"iaas:user:{email.strip().lower()}"))
 
 
 @dataclass
@@ -54,16 +60,59 @@ class FakeIamClient(IamPort):
         self._users: dict[str, _UserRecord] = {}
         self._projects: dict[str, _ProjectRecord] = {}
 
-    # ---- hors port : préparer des données (l'inscription est gérée par l'IAM réel) ----
+    # ---- hors port : préparer des données de test ou de démonstration ----
     def add_user(self, email: str, password: str, first_name: str = "", last_name: str = "",
                  role: GlobalRole = GlobalRole.USER, user_id: str | None = None) -> Identity:
+        email = self._normalize_email(email)
         self._ensure_email_free(email)
-        identity = Identity(user_id or str(uuid.uuid4()), email, first_name, last_name, role)
+        identity = Identity(user_id or stable_user_id(email), email, first_name, last_name, role)
         self._users[identity.user_id] = _UserRecord(identity, _hash(password))
         return identity
 
+    def restore_project(
+        self,
+        project_id: str,
+        owner_id: str,
+        grants: dict[str, Collection[Right]],
+    ) -> None:
+        """Rehydrate un projet depuis la base metier (appele au demarrage).
+
+        Les utilisateurs inconnus du mock sont ignores : ils ne peuvent pas se connecter
+        et ne doivent pas rendre le projet inaccessible a son proprietaire.
+        """
+        if owner_id not in self._users:
+            return
+        known = {user: self._checked(rights) for user, rights in grants.items() if user in self._users}
+        self._projects[project_id] = _ProjectRecord(owner_id=owner_id, grants=known)
+
     # ---- port ----
+    async def register_user(
+        self, email: str, password: str, first_name: str, last_name: str
+    ) -> AuthToken:
+        identity = self.add_user(
+            email,
+            password,
+            first_name,
+            last_name,
+            role=GlobalRole.USER,
+            user_id=str(uuid.uuid4()),
+        )
+        return self._issue_token(identity)
+
+    async def create_admin(
+        self, email: str, password: str, first_name: str, last_name: str
+    ) -> Identity:
+        return self.add_user(
+            email,
+            password,
+            first_name,
+            last_name,
+            role=GlobalRole.ADMIN,
+            user_id=str(uuid.uuid4()),
+        )
+
     async def login(self, email: str, password: str) -> AuthToken:
+        email = self._normalize_email(email)
         record = next((r for r in self._users.values() if r.identity.email == email), None)
         if record is None or record.password_hash != _hash(password):
             raise InvalidCredentials()
@@ -74,11 +123,12 @@ class FakeIamClient(IamPort):
 
     async def update_user(self, user_id: str, changes: UserUpdate) -> AuthToken:
         record = self._get_user(user_id)
-        if changes.email and changes.email != record.identity.email:
-            self._ensure_email_free(changes.email)
+        email = self._normalize_email(changes.email) if changes.email is not None else None
+        if email is not None and email != record.identity.email:
+            self._ensure_email_free(email)
         record.identity = replace(
             record.identity,
-            email=changes.email if changes.email is not None else record.identity.email,
+            email=email if email is not None else record.identity.email,
             first_name=changes.first_name if changes.first_name is not None else record.identity.first_name,
             last_name=changes.last_name if changes.last_name is not None else record.identity.last_name,
         )
@@ -118,6 +168,18 @@ class FakeIamClient(IamPort):
             raise NotAMember(user_id)
         project.grants[user_id] = self._checked(rights)
 
+    async def remove_member(self, user_id: str, project_id: str) -> None:
+        self._get_user(user_id)
+        project = self._get_project(project_id)
+        if project.owner_id == user_id:
+            raise OwnerRightsImmutable(user_id)
+        if user_id not in project.grants:
+            raise NotAMember(user_id)
+        del project.grants[user_id]
+
+    async def get_user(self, user_id: str) -> Identity:
+        return self._get_user(user_id).identity
+
     async def get_rights(self, user_id: str, project_id: str) -> frozenset[Right]:
         self._get_user(user_id)
         project = self._get_project(project_id)
@@ -128,6 +190,28 @@ class FakeIamClient(IamPort):
     async def list_projects(self, user_id: str) -> frozenset[str]:
         self._get_user(user_id)
         return frozenset(pid for pid, p in self._projects.items() if self._is_member(p, user_id))
+
+    async def list_members(self, project_id: str) -> tuple[MemberGrant, ...]:
+        """Membres du projet. Le proprietaire recoit l'ensemble des droits connus."""
+        project = self._get_project(project_id)
+        owner = MemberGrant(project.owner_id, True, self._known_rights)
+        guests = tuple(
+            MemberGrant(user_id, False, rights) for user_id, rights in project.grants.items()
+        )
+        return (owner, *guests)
+
+    async def delete_project(self, project_id: str) -> None:
+        """Retire le projet du mock, y compris les droits des invites."""
+        self._get_project(project_id)
+        del self._projects[project_id]
+
+    async def find_user_id_by_email(self, email: str) -> str | None:
+        """Cherche un compte par email, sans tenir compte de la casse."""
+        needle = self._normalize_email(email)
+        for record in self._users.values():
+            if record.identity.email == needle:
+                return record.identity.user_id
+        return None
 
     # ---- privé ----
     def _issue_token(self, identity: Identity) -> AuthToken:
@@ -156,5 +240,10 @@ class FakeIamClient(IamPort):
             raise ProjectNotFound(project_id) from None
 
     def _ensure_email_free(self, email: str) -> None:
-        if any(r.identity.email == email for r in self._users.values()):
+        normalized_email = self._normalize_email(email)
+        if any(r.identity.email == normalized_email for r in self._users.values()):
             raise EmailAlreadyUsed(email)
+
+    @staticmethod
+    def _normalize_email(email: str) -> str:
+        return email.strip().lower()

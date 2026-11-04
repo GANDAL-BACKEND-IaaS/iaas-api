@@ -413,6 +413,13 @@ Les ressources de projet (membres, invitations, VM et stockage) sont listées da
 - Réponse `200 OK` : `IdentityOut`.
 - Erreur : `401`.
 
+### `GET /api/v1/admin/users` — Lister les utilisateurs
+
+- Accès : administrateur connecté.
+- Query : `page` (défaut 1) et `page_size` (défaut 20, maximum 100).
+- Réponse `200 OK` : page standard contenant les identités fournies par l'IAM (`user_id`, `email`, `first_name`, `last_name`, `role`), administrateurs inclus.
+- Erreurs : `401` non authentifié ; `403` rôle non administrateur ; `422` paramètres invalides.
+
 ### `PATCH /api/v1/auth/me` — Modifier son compte
 
 - Accès : authentifié.

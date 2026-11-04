@@ -117,6 +117,38 @@ def test_only_admin_can_create_another_admin(client):
     assert response.status_code == 403
 
 
+def test_admin_can_list_all_users_with_pagination(client):
+    response = client.get(
+        "/api/v1/admin/users",
+        headers=_headers(client, "root@x.cm"),
+        params={"page": 1, "page_size": 1},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["total_items"] == 2
+    assert payload["total_pages"] == 2
+    assert payload["page"] == 1 and payload["page_size"] == 1
+    assert len(payload["items"]) == 1
+    assert set(payload["items"][0]) == {
+        "user_id", "email", "first_name", "last_name", "role"
+    }
+
+    second_page = client.get(
+        "/api/v1/admin/users",
+        headers=_headers(client, "root@x.cm"),
+        params={"page": 2, "page_size": 1},
+    )
+    assert second_page.status_code == 200
+    assert second_page.json()["items"][0]["role"] == "user"
+
+
+def test_only_admin_can_list_users(client):
+    assert client.get("/api/v1/admin/users").status_code == 401
+    response = client.get("/api/v1/admin/users", headers=_headers(client))
+    assert response.status_code == 403
+
+
 def test_create_admin_duplicate_email_returns_conflict(client):
     response = client.post(
         "/api/v1/admin/admins",

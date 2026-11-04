@@ -26,6 +26,7 @@ from app.core.dependencies import (
     get_token_decoder,
 )
 from app.core.errors import ErrorCode, error_responses
+from app.core.pagination import Page, PageParams, get_page_params
 from app.features.auth import service
 from app.features.auth.dependencies import get_current_identity, require_admin
 from app.features.auth.schemas import (
@@ -41,6 +42,28 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 admin_router = APIRouter(prefix="/admin", tags=["admin: gestion des comptes"])
 
 _AUTH = (ErrorCode.UNAUTHORIZED, ErrorCode.VALIDATION_ERROR)
+_ADMIN = (ErrorCode.UNAUTHORIZED, ErrorCode.FORBIDDEN, ErrorCode.VALIDATION_ERROR)
+
+
+@admin_router.get(
+    "/users",
+    response_model=Page[IdentityOut],
+    operation_id="list_users",
+    summary="Lister les utilisateurs",
+    description="Retourne les identites de tous les comptes connus de l'IAM, administrateurs inclus.",
+    responses=error_responses(*_ADMIN),
+)
+async def list_users(
+    iam: IamPort = Depends(get_iam),
+    _: Identity = Depends(require_admin),
+    params: PageParams = Depends(get_page_params),
+) -> Page[IdentityOut]:
+    """Liste les identites IAM avec la pagination standard de l'API."""
+    identities, total = await iam.list_users(
+        offset=(params.page - 1) * params.page_size,
+        limit=params.page_size,
+    )
+    return Page.build([IdentityOut.of(identity) for identity in identities], total, params)
 
 
 @router.post(

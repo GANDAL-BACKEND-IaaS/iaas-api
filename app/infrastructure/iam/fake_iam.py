@@ -180,6 +180,13 @@ class FakeIamClient(IamPort):
     async def get_user(self, user_id: str) -> Identity:
         return self._get_user(user_id).identity
 
+    async def list_users(self, offset: int, limit: int) -> tuple[tuple[Identity, ...], int]:
+        users = sorted(
+            (record.identity for record in self._users.values()),
+            key=lambda identity: (identity.email, identity.user_id),
+        )
+        return tuple(users[offset : offset + limit]), len(users)
+
     async def get_rights(self, user_id: str, project_id: str) -> frozenset[Right]:
         self._get_user(user_id)
         project = self._get_project(project_id)

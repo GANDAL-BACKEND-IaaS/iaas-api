@@ -77,6 +77,17 @@ async def test_create_admin_assigns_global_admin_role(iam):
     assert await iam.validate_token(token.access_token) == identity
 
 
+async def test_list_users_returns_sorted_page_and_total(iam, alice):
+    root = iam.add_user("root@x.cm", "pw", "Root", "Admin", role=GlobalRole.ADMIN)
+    bob = iam.add_user("bob@x.cm", "pw", "Bob", "User")
+
+    users, total = await iam.list_users(offset=1, limit=2)
+
+    assert total == 3
+    assert users == (bob, root)
+    assert alice not in users
+
+
 async def test_find_user_id_by_email_ignores_case_and_spaces(iam, alice):
     """Le lookup email est utilisable tel que saisi par le frontend."""
     assert await iam.find_user_id_by_email("  ALICE@X.CM  ") == alice.user_id

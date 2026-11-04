@@ -111,6 +111,10 @@ class IamPort(ABC):
         """Retourne l'identite connue de l'IAM, ou leve UserNotFound."""
 
     @abstractmethod
+    async def list_users(self, offset: int, limit: int) -> tuple[tuple[Identity, ...], int]:
+        """Liste les identites IAM avec pagination et retourne leur nombre total."""
+
+    @abstractmethod
     async def get_rights(self, user_id: str, project_id: str) -> frozenset[Right]:
         """Droits de l'utilisateur sur le projet. Vide s'il n'est pas membre."""
 

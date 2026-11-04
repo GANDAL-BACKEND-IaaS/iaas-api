@@ -45,6 +45,7 @@ def test_admin_operations_are_grouped_under_admin_tags():
     schema = app.openapi()
     admin_operations = {
         "create_admin",
+        "list_users",
         "create_profile",
         "update_profile",
         "delete_profile",

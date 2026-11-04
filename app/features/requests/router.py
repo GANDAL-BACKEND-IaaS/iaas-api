@@ -10,9 +10,8 @@ from sqlalchemy.orm import Session
 from app.application.ports.hypervisor import HypervisorPort
 from app.application.ports.iam import IamPort, Identity
 from app.application.ports.notifications import NotificationsPort
-from app.application.ports.storage import StoragePort
 from app.core.database import get_db
-from app.core.dependencies import get_hypervisor, get_iam, get_notifications, get_storage
+from app.core.dependencies import get_hypervisor, get_iam, get_notifications
 from app.core.errors import ErrorCode, error_responses
 from app.core.pagination import Page, PageParams, get_page_params
 from app.features.auth.dependencies import get_current_identity, require_admin
@@ -96,7 +95,7 @@ async def get_request(
     return RequestOut.model_validate(row)
 
 
-@admin_router.post(
+@router.post(
     "/{request_id}/cancel",
     response_model=RequestOut,
     operation_id="cancel_request",
@@ -114,7 +113,7 @@ def cancel_request(
     return RequestOut.model_validate(row)
 
 
-@router.post(
+@admin_router.post(
     "/{request_id}/accept",
     response_model=RequestOut,
     operation_id="accept_request",
@@ -129,7 +128,6 @@ async def accept_request(
     identity: Identity = Depends(require_admin),
     db: Session = Depends(get_db),
     hypervisor: HypervisorPort = Depends(get_hypervisor),
-    storage: StoragePort = Depends(get_storage),
     notifications: NotificationsPort = Depends(get_notifications),
 ) -> RequestOut:
     """Accepte une demande en attente et declenche le traitement technique (F16)."""
@@ -140,7 +138,6 @@ async def accept_request(
         request_id=request_id,
         note=body.note,
         hypervisor=hypervisor,
-        storage=storage,
         notifications=notifications,
     )
     return RequestOut.model_validate(row)

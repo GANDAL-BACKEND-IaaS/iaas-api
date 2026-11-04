@@ -7,12 +7,11 @@ conservee dans le contrat ; son implementation technologique viendra plus tard.
 from fastapi import APIRouter, Body, Depends, Query, status
 from sqlalchemy.orm import Session
 
-from app.application.ports.dns import DnsPort
 from app.application.ports.hypervisor import HypervisorPort
 from app.application.ports.iam import IamPort, Identity
 from app.application.ports.network import NetworkPort
 from app.core.database import get_db
-from app.core.dependencies import get_dns, get_hypervisor, get_iam, get_network
+from app.core.dependencies import get_hypervisor, get_iam, get_network
 from app.core.errors import ErrorCode, error_responses
 from app.core.pagination import Page, PageParams, get_page_params
 from app.features.auth.dependencies import get_current_identity
@@ -180,7 +179,6 @@ async def delete_vm(
     iam: IamPort = Depends(get_iam),
     hypervisor: HypervisorPort = Depends(get_hypervisor),
     network: NetworkPort = Depends(get_network),
-    dns: DnsPort = Depends(get_dns),
     db: Session = Depends(get_db),
     body: DeletionIn = Body(default_factory=DeletionIn),
 ):
@@ -190,7 +188,6 @@ async def delete_vm(
         iam,
         hypervisor,
         network,
-        dns,
         identity,
         project_id,
         vm_id,

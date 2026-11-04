@@ -7,20 +7,16 @@ from sqlalchemy.pool import StaticPool
 from app.application.ports.iam import GlobalRole
 from app.core.database import get_db
 from app.core.dependencies import (
-    get_dns,
     get_hypervisor,
     get_iam,
     get_network,
     get_notifications,
-    get_storage,
 )
 from app.core.settings import get_settings
-from app.infrastructure.dns.fake_dns import FakeDns
 from app.infrastructure.hypervisor.fake_hypervisor import FakeHypervisor
 from app.infrastructure.iam.fake_iam import FakeIamClient
 from app.infrastructure.network.fake_network import FakeNetwork
 from app.infrastructure.notifications.fake_notifications import FakeNotifications
-from app.infrastructure.storage.fake_storage import FakeStorage
 from app.main import app
 from app.shared import models as _models  # noqa: F401  enregistre toutes les tables
 from app.shared.models.base import Base
@@ -60,31 +56,17 @@ def network():
 
 
 @pytest.fixture
-def dns():
-    """DNS mock neuf pour chaque test."""
-    return FakeDns()
-
-
-@pytest.fixture
 def notifications():
     """Notifications mock neuves pour chaque test."""
     return FakeNotifications()
 
 
 @pytest.fixture
-def storage_port():
-    """Stockage mock neuf pour chaque test."""
-    return FakeStorage()
-
-
-@pytest.fixture
-def client(db, iam, hypervisor, network, dns, notifications, storage_port):
+def client(db, iam, hypervisor, network, notifications):
     app.dependency_overrides[get_db] = lambda: db
     app.dependency_overrides[get_iam] = lambda: iam
     app.dependency_overrides[get_hypervisor] = lambda: hypervisor
     app.dependency_overrides[get_network] = lambda: network
-    app.dependency_overrides[get_dns] = lambda: dns
     app.dependency_overrides[get_notifications] = lambda: notifications
-    app.dependency_overrides[get_storage] = lambda: storage_port
     yield TestClient(app)  # sans "with" : le lifespan (BD réelle) n'est pas lancé
     app.dependency_overrides.clear()

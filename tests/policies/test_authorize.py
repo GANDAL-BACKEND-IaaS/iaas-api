@@ -44,7 +44,7 @@ async def test_member_without_right_is_forbidden(db, iam):
     """Un invite sans le droit requis est refuse."""
     owner = await own_project(db, iam)
     guest = iam.add_user("guest@x.cm", "pw")
-    await iam.invite_user(guest.user_id, "p1", ["storage.view"])
+    await iam.invite_user(guest.user_id, "p1", [])
     add_vm(db, "p1")
     with pytest.raises(AppError) as exc:
         await authorize(

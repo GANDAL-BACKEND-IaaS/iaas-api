@@ -21,8 +21,6 @@ class RequestKind(StrEnum):
 
     VM_CREATE = "vm_create"
     VM_UPDATE = "vm_update"
-    STORAGE_CREATE = "storage_create"
-    STORAGE_UPDATE = "storage_update"
 
 
 class ShareStatus(StrEnum):
@@ -49,10 +47,9 @@ class MembershipRole(StrEnum):
 
 
 class ResourceType(StrEnum):
-    """Type de ressource IaaS. Une ressource est une VM ou un espace de stockage."""
+    """Type de ressource gerable et partageable par l'API."""
 
     VM = "vm"
-    STORAGE = "storage"
 
 
 class VmState(StrEnum):
@@ -73,13 +70,6 @@ class PowerState(StrEnum):
     STARTING = "starting"
     STOPPING = "stopping"
     RESTARTING = "restarting"
-
-
-class StorageState(StrEnum):
-    """Etat local connu d'un espace de stockage."""
-
-    AVAILABLE = "available"
-    DELETING = "deleting"
 
 
 class PowerAction(StrEnum):

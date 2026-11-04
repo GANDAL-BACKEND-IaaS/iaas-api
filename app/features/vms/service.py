@@ -7,7 +7,6 @@ Les actions directes appellent les ports et ne sont jamais appliquees a moitie.
 from sqlalchemy import delete, or_, select
 from sqlalchemy.orm import Session
 
-from app.application.ports.dns import DnsPort, DnsUnavailable
 from app.application.ports.hypervisor import HypervisorPort, HypervisorUnavailable, VmRef
 from app.application.ports.iam import IamPort, Identity
 from app.application.ports.network import NetworkPort, NetworkUnavailable
@@ -261,7 +260,6 @@ async def delete_vm_infrastructure(
     db: Session,
     hypervisor: HypervisorPort,
     network: NetworkPort,
-    dns: DnsPort,
     *,
     actor_id: str,
     vm: Vm,
@@ -277,7 +275,6 @@ async def delete_vm_infrastructure(
     )
     for owner in projects:
         await network.detach_vm_from_project(VmRef(vm.id), owner)
-    await dns.delete_domain(vm.id)
     await hypervisor.delete_vm(VmRef(vm.id))
     db.execute(delete(NetworkVm).where(NetworkVm.vm_id == vm.id))
     record_audit(
@@ -295,7 +292,6 @@ async def delete_vm(
     iam: IamPort,
     hypervisor: HypervisorPort,
     network: NetworkPort,
-    dns: DnsPort,
     identity: Identity,
     project_id: str,
     vm_id: str,
@@ -334,14 +330,13 @@ async def delete_vm(
             db,
             hypervisor,
             network,
-            dns,
             actor_id=identity.user_id,
             vm=vm,
         )
     except AppError:
         db.rollback()
         raise
-    except (NetworkUnavailable, DnsUnavailable, HypervisorUnavailable, KeyError):
+    except (NetworkUnavailable, HypervisorUnavailable, KeyError):
         db.rollback()
         raise upstream_unavailable("infrastructure") from None
     db.commit()

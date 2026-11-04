@@ -158,8 +158,8 @@ async def test_update_rights_replaces(iam, alice):
     bob = iam.add_user("bob@x.cm", "pw2")
     await iam.create_project(alice.user_id, "p1")
     await iam.invite_user(bob.user_id, "p1", ["vm.view"])
-    await iam.update_rights(bob.user_id, "p1", ["storage.view"])
-    assert await iam.get_rights(bob.user_id, "p1") == {"storage.view"}
+    await iam.update_rights(bob.user_id, "p1", ["vm.view"])
+    assert await iam.get_rights(bob.user_id, "p1") == {"vm.view"}
 
 
 async def test_rights_rules(iam, alice):

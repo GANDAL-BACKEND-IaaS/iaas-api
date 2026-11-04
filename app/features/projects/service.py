@@ -11,7 +11,6 @@ from sqlalchemy import delete, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.application.ports.dns import DnsPort, DnsUnavailable
 from app.application.ports.hypervisor import HypervisorPort, HypervisorUnavailable, VmRef
 from app.application.ports.iam import (
     AlreadyMember,
@@ -25,7 +24,6 @@ from app.application.ports.iam import (
 )
 from app.application.ports.network import NetworkPort, NetworkRef, NetworkUnavailable
 from app.application.ports.notifications import Notification, NotificationsPort
-from app.application.ports.storage import StoragePort, StorageUnavailable
 from app.core.audit import record_audit
 from app.core.errors import AppError, ErrorCode, upstream_unavailable
 from app.core.pagination import Page, PageParams, paginate
@@ -38,7 +36,6 @@ from app.features.projects.schemas import (
     ProjectOut,
 )
 from app.features.shares.service import revoke_received_by_project
-from app.features.storages.service import delete_storage_infrastructure
 from app.features.vms.service import delete_vm_infrastructure
 from app.shared.deletion import DeletionOut, DeletionPreviewOut, expected_text, is_confirmed
 from app.shared.enums import (
@@ -53,7 +50,6 @@ from app.shared.models.projects import Invitation, Membership, Project
 from app.shared.models.requests import ResourceRequest
 from app.shared.models.rights import RightModel
 from app.shared.models.shares import ResourceShare
-from app.shared.models.storages import Storage
 from app.shared.models.vms import Vm
 from app.shared.policies.rights import membership_rights
 from app.shared.time import utcnow
@@ -204,8 +200,6 @@ async def _delete_project_resources(
     db: Session,
     hypervisor: HypervisorPort,
     network: NetworkPort,
-    dns: DnsPort,
-    storage: StoragePort,
     *,
     actor_id: str,
     project: Project,
@@ -222,11 +216,8 @@ async def _delete_project_resources(
     vms = list(db.scalars(select(Vm).where(Vm.origin_project_id == project.id)))
     for vm in vms:
         await delete_vm_infrastructure(
-            db, hypervisor, network, dns, actor_id=actor_id, vm=vm
+            db, hypervisor, network, actor_id=actor_id, vm=vm
         )
-    storages = list(db.scalars(select(Storage).where(Storage.origin_project_id == project.id)))
-    for row in storages:
-        await delete_storage_infrastructure(db, storage, actor_id=actor_id, storage=row)
     db.execute(delete(ResourceRequest).where(ResourceRequest.project_id == project.id))
     db.execute(
         delete(ResourceShare).where(
@@ -245,8 +236,6 @@ async def delete_project(
     iam: IamPort,
     hypervisor: HypervisorPort,
     network: NetworkPort,
-    dns: DnsPort,
-    storage: StoragePort,
     identity: Identity,
     project_id: str,
     confirmation_text: str | None,
@@ -259,9 +248,6 @@ async def delete_project(
     text = expected_text(project.name)
     if not is_confirmed(confirmation_text, text):
         vm_count = len(list(db.scalars(select(Vm.id).where(Vm.origin_project_id == project.id))))
-        storage_count = len(
-            list(db.scalars(select(Storage.id).where(Storage.origin_project_id == project.id)))
-        )
         network_count = len(
             list(db.scalars(select(Network.id).where(Network.project_id == project.id)))
         )
@@ -279,7 +265,7 @@ async def delete_project(
             confirmation_text=text,
             warning=(
                 f"Le projet {project.name} sera supprime avec {vm_count} VM, "
-                f"{storage_count} stockage(s) et {network_count} reseau(x). "
+                f"{network_count} reseau(x). "
                 f"{received} partage(s) recu(s) seront revoques. Cette action est irreversible."
             ),
         )
@@ -288,8 +274,6 @@ async def delete_project(
             db,
             hypervisor,
             network,
-            dns,
-            storage,
             actor_id=identity.user_id,
             project=project,
         )
@@ -298,9 +282,7 @@ async def delete_project(
         raise
     except (
         NetworkUnavailable,
-        DnsUnavailable,
         HypervisorUnavailable,
-        StorageUnavailable,
         KeyError,
     ):
         db.rollback()

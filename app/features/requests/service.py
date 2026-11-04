@@ -15,21 +15,17 @@ from sqlalchemy.orm import Session
 from app.application.ports.hypervisor import HypervisorPort, HypervisorUnavailable, VmRef, VmSpec
 from app.application.ports.iam import GlobalRole, IamPort
 from app.application.ports.notifications import Notification, NotificationsPort
-from app.application.ports.storage import StoragePort, StorageRef, StorageSpec, StorageUnavailable
 from app.core.audit import record_audit
 from app.core.errors import AppError, ErrorCode, upstream_unavailable
 from app.core.pagination import PageParams, paginate
 from app.features.requests.schemas import (
-    StorageCreateRequestIn,
-    StorageUpdateRequestIn,
     VMCreateRequestIn,
     VMUpdateRequestIn,
 )
-from app.shared.enums import RequestKind, RequestStatus, ResourceType, StorageState, VmState
+from app.shared.enums import RequestKind, RequestStatus, ResourceType, VmState
 from app.shared.models.packs import Pack
 from app.shared.models.projects import Project
 from app.shared.models.requests import ResourceRequest
-from app.shared.models.storages import Storage
 from app.shared.models.vms import Vm
 from app.shared.policies.access import ResourceView, authorize
 from app.shared.time import utcnow
@@ -39,8 +35,6 @@ logger = logging.getLogger(__name__)
 _RIGHT_FOR_KIND = {
     RequestKind.VM_CREATE: "vm.request_create",
     RequestKind.VM_UPDATE: "vm.request_update",
-    RequestKind.STORAGE_CREATE: "storage.request_create",
-    RequestKind.STORAGE_UPDATE: "storage.request_update",
 }
 
 Handler = Callable[["RequestContext"], Awaitable[None]]
@@ -54,7 +48,6 @@ class RequestContext:
     db: Session
     request: ResourceRequest
     hypervisor: HypervisorPort
-    storage: StoragePort
 
 
 def register_handler(kind: RequestKind, handler: Handler) -> None:
@@ -113,20 +106,6 @@ def _normalize_vm_update(payload: dict) -> dict:
         raise _validation(exc) from None
 
 
-def _normalize_storage_create(payload: dict) -> dict:
-    try:
-        return StorageCreateRequestIn.model_validate(payload).model_dump()
-    except ValidationError as exc:
-        raise _validation(exc) from None
-
-
-def _normalize_storage_update(payload: dict) -> dict:
-    try:
-        return StorageUpdateRequestIn.model_validate(payload).model_dump()
-    except ValidationError as exc:
-        raise _validation(exc) from None
-
-
 def _prepare(
     db: Session,
     kind: RequestKind,
@@ -138,27 +117,15 @@ def _prepare(
         if target_resource_id is not None:
             raise AppError(ErrorCode.VALIDATION_ERROR, "Une creation ne cible pas une ressource existante.")
         return _normalize_vm_create(db, payload), None, None
-    if kind == RequestKind.STORAGE_CREATE:
-        if target_resource_id is not None:
-            raise AppError(ErrorCode.VALIDATION_ERROR, "Une creation ne cible pas une ressource existante.")
-        return _normalize_storage_create(payload), None, None
     if target_resource_id is None:
         raise AppError(ErrorCode.VALIDATION_ERROR, "La modification exige target_resource_id.")
-    if kind == RequestKind.VM_UPDATE:
-        vm = db.get(Vm, target_resource_id)
-        if vm is None:
-            raise AppError(ErrorCode.NOT_FOUND, "VM introuvable.")
-        if vm.state == VmState.DELETING.value:
-            raise AppError(ErrorCode.INVALID_STATE, "La VM est en cours de suppression.")
-        view = ResourceView(ResourceType.VM.value, vm.id, vm.origin_project_id)
-        return _normalize_vm_update(payload), ResourceType.VM.value, view
-    storage = db.get(Storage, target_resource_id)
-    if storage is None:
-        raise AppError(ErrorCode.NOT_FOUND, "Stockage introuvable.")
-    if storage.state == StorageState.DELETING.value:
-        raise AppError(ErrorCode.INVALID_STATE, "Le stockage est en cours de suppression.")
-    view = ResourceView(ResourceType.STORAGE.value, storage.id, storage.origin_project_id)
-    return _normalize_storage_update(payload), ResourceType.STORAGE.value, view
+    vm = db.get(Vm, target_resource_id)
+    if vm is None:
+        raise AppError(ErrorCode.NOT_FOUND, "VM introuvable.")
+    if vm.state == VmState.DELETING.value:
+        raise AppError(ErrorCode.INVALID_STATE, "La VM est en cours de suppression.")
+    view = ResourceView(ResourceType.VM.value, vm.id, vm.origin_project_id)
+    return _normalize_vm_update(payload), ResourceType.VM.value, view
 
 
 def _find_duplicate(
@@ -284,7 +251,6 @@ async def accept_request(
     request_id: str,
     note: str | None,
     hypervisor: HypervisorPort,
-    storage: StoragePort,
     notifications: NotificationsPort,
 ) -> ResourceRequest:
     """Accepte une demande sans la modifier, puis appelle le handler du kind (R3, F16)."""
@@ -297,13 +263,13 @@ async def accept_request(
             ErrorCode.INTERNAL_ERROR,
             f"Aucun traitement technique n'est enregistre pour {row.kind}.",
         )
-    context = RequestContext(db=db, request=row, hypervisor=hypervisor, storage=storage)
+    context = RequestContext(db=db, request=row, hypervisor=hypervisor)
     try:
         await handler(context)
     except AppError:
         db.rollback()
         raise
-    except (HypervisorUnavailable, StorageUnavailable):
+    except HypervisorUnavailable:
         db.rollback()
         raise upstream_unavailable("infrastructure") from None
     except Exception:
@@ -533,44 +499,7 @@ async def handle_vm_update(context: RequestContext) -> None:
         raise upstream_unavailable("Hyperviseur") from None
 
 
-async def handle_storage_create(context: RequestContext) -> None:
-    """Cree le stockage via le groupe Stockage puis l'enregistre dans le projet."""
-    payload = context.request.payload
-    try:
-        ref = await context.storage.create_storage(
-            StorageSpec(name=payload["name"], size_gb=payload["size_gb"])
-        )
-    except StorageUnavailable:
-        raise upstream_unavailable("Stockage") from None
-    context.db.add(
-        Storage(
-            id=ref.storage_id,
-            origin_project_id=context.request.project_id,
-            name=payload["name"],
-            ip_address=ref.ip_address,
-            size_gb=payload["size_gb"],
-            state=StorageState.AVAILABLE.value,
-        )
-    )
-    context.request.target_resource_type = ResourceType.STORAGE.value
-    context.request.target_resource_id = ref.storage_id
-
-
-async def handle_storage_update(context: RequestContext) -> None:
-    """Modifie uniquement la taille du stockage (F9, R3)."""
-    storage = context.db.get(Storage, context.request.target_resource_id)
-    if storage is None:
-        raise AppError(ErrorCode.NOT_FOUND, "Stockage introuvable.")
-    storage.size_gb = context.request.payload["size_gb"]
-    try:
-        await context.storage.resize(StorageRef(storage.id), storage.size_gb)
-    except StorageUnavailable:
-        raise upstream_unavailable("Stockage") from None
-
-
 def register_default_handlers() -> None:
     """Enregistre les traitements techniques par defaut, adosses aux ports."""
     register_handler(RequestKind.VM_CREATE, handle_vm_create)
     register_handler(RequestKind.VM_UPDATE, handle_vm_update)
-    register_handler(RequestKind.STORAGE_CREATE, handle_storage_create)
-    register_handler(RequestKind.STORAGE_UPDATE, handle_storage_update)

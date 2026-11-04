@@ -12,17 +12,16 @@ La specification de reference est docs/conception-iaas-api.pdf. Elle prime sur t
 
 - VSA / hexagonale : la logique metier ne connait que des ports. Les adaptateurs vivent dans app/infrastructure.
 - Tant que l'integration n'est pas faite, toute dependance externe passe par un mock.
-- Ne pas appeler un groupe externe (hyperviseur, reseau, stockage, DNS, notifications) autrement que via son port.
-- Le backend ne gere pas les comptes, l'hyperviseur, le DNS ni le PaaS. Il orchestre.
+- Ne pas appeler un groupe externe (IAM, hyperviseur, reseau, notifications) autrement que via son port.
+- Le backend orchestre les interactions avec l'IAM, l'hyperviseur, le reseau et les notifications.
 
 ## Dossiers par developpeur
 
 Ne modifier que son perimetre, pour eviter les conflits sur develop.
 
 - ZUCHUON (IAM) : app/application/ports/iam.py, app/infrastructure/iam/, app/features/auth/, app/features/profiles/, app/features/projects/, app/shared/models/projects.py
-- NAOMI (VM) : app/features/vms/, app/features/packs/, app/application/ports/hypervisor.py, app/application/ports/dns.py, app/infrastructure/hypervisor/, app/infrastructure/dns/, app/shared/models/vms.py, app/shared/models/packs.py
+- NAOMI (VM) : app/features/vms/, app/features/packs/, app/application/ports/hypervisor.py, app/infrastructure/hypervisor/, app/shared/models/vms.py, app/shared/models/packs.py
 - KOM (Reseau) : app/features/networks/, app/application/ports/network.py, app/infrastructure/network/, app/shared/models/networks.py
-- TABA (Espaces) : app/features/storages/, app/application/ports/storage.py, app/infrastructure/storage/, app/shared/models/storages.py
 
 Le socle partage (app/core, app/api, app/features/requests, app/features/shares, app/shared/policies, notifications) ne change qu'avec l'accord de l'equipe.
 
@@ -49,5 +48,5 @@ Le socle partage (app/core, app/api, app/features/requests, app/features/shares,
 - Figure 3 pour chaque action sur une ressource : membre, ressource visible, droit requis. Le proprietaire a tous les droits.
 - Une ressource partagee utilise les droits du projet destinataire. Le partage ne transmet aucun droit.
 - Seules creation et modification passent par une demande traitee par un administrateur, sans modifier le contenu demande.
-- La suppression est directe, revoque les partages, et pour une VM appelle le DNS puis la sort des reseaux.
+- La suppression est directe et revoque les partages ; une VM est retiree de l'hyperviseur et de ses reseaux via les ports respectifs.
 - Un pack utilise par une demande de creation en attente ne se supprime pas. S'il est modifie, ces demandes sont mises a jour et restent a valider.

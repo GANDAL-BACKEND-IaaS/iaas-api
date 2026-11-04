@@ -31,7 +31,6 @@ from app.shared.models import (  # noqa: F401
     requests,
     rights,
     shares,
-    storages,
     vms,
 )
 from app.shared.models.projects import Membership, Project
@@ -105,8 +104,8 @@ def ready(db: Session = Depends(get_db)) -> ReadinessOut:
     """Sonde de disponibilite : verifie les dependances necessaires au service.
 
     A ce stade, la base de donnees est la seule dependance reelle. Les ports
-    hyperviseur, stockage, reseau, DNS, IAM et notifications sont encore des
-    mocks : les sonder n'apporterait aucune information d'exploitation.
+    hyperviseur, reseau, IAM et notifications sont encore des mocks : les sonder
+    n'apporterait aucune information d'exploitation.
     """
     try:
         db.execute(text("SELECT 1"))

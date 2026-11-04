@@ -3,7 +3,7 @@
 Importer ce module suffit pour que Base.metadata connaisse toutes les tables.
 """
 
-from . import audit, identities, networks, packs, projects, requests, rights, shares, storages, vms
+from . import audit, identities, networks, packs, projects, requests, rights, shares, vms
 
 __all__ = [
     "audit",
@@ -14,6 +14,5 @@ __all__ = [
     "requests",
     "rights",
     "shares",
-    "storages",
     "vms",
 ]

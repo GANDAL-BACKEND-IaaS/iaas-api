@@ -8,20 +8,16 @@ from collections.abc import Callable
 from datetime import timedelta
 from functools import lru_cache
 
-from app.application.ports.dns import DnsPort
 from app.application.ports.hypervisor import HypervisorPort
 from app.application.ports.iam import GlobalRole, IamPort, Identity
 from app.application.ports.network import NetworkPort
 from app.application.ports.notifications import NotificationsPort
-from app.application.ports.storage import StoragePort
 from app.core.settings import get_settings
 from app.core.tokens import decode_token
-from app.infrastructure.dns.fake_dns import FakeDns
 from app.infrastructure.hypervisor.fake_hypervisor import FakeHypervisor
 from app.infrastructure.iam.fake_iam import FakeIamClient, stable_user_id
 from app.infrastructure.network.fake_network import FakeNetwork
 from app.infrastructure.notifications.fake_notifications import FakeNotifications
-from app.infrastructure.storage.fake_storage import FakeStorage
 from app.shared.seed.loader import load_rights_catalog
 
 
@@ -67,18 +63,6 @@ def get_hypervisor() -> HypervisorPort:
 def get_network() -> NetworkPort:
     """Mock reseau, remplace par le client du groupe Reseau au moment de l'integration."""
     return FakeNetwork()
-
-
-@lru_cache
-def get_storage() -> StoragePort:
-    """Mock stockage, remplace par le client du groupe Stockage au moment de l'integration."""
-    return FakeStorage()
-
-
-@lru_cache
-def get_dns() -> DnsPort:
-    """Mock DNS, remplace par le client de l'equipe tierce au moment de l'integration."""
-    return FakeDns()
 
 
 @lru_cache

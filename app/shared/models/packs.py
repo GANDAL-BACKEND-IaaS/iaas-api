@@ -14,7 +14,7 @@ from app.shared.time import utcnow
 
 
 class Pack(Base):
-    """Configuration preetablie : RAM, vCPU, VRAM et stockage SSD."""
+    """Configuration preetablie : RAM, vCPU, VRAM et disque SSD."""
 
     __tablename__ = "packs"
 

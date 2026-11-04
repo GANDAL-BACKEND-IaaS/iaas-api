@@ -7,9 +7,8 @@ from app.shared.models.networks import Network
 from app.shared.models.projects import Invitation, Membership, Project
 from app.shared.models.requests import ResourceRequest
 from app.shared.models.shares import ResourceShare
-from app.shared.models.storages import Storage
 from app.shared.models.vms import Vm
-from tests.support import add_project, add_storage, add_vm, own_project
+from tests.support import add_project, add_vm, own_project
 
 
 def _login(client, email="u@x.cm", password="pw"):
@@ -26,7 +25,6 @@ async def test_delete_owner_account_cascades_projects(client, db, iam):
     """Les projets dont l'utilisateur est proprietaire et leurs ressources disparaissent."""
     uid = await own_project(db, iam, "p1")
     add_vm(db, "p1", "vm-1")
-    add_storage(db, "p1", "st-1")
     db.add(Network(id="net-1", project_id="p1", name="lan"))
     db.commit()
     headers = _headers(client)
@@ -36,7 +34,6 @@ async def test_delete_owner_account_cascades_projects(client, db, iam):
     assert response.status_code == 204
     assert db.get(Project, "p1") is None
     assert db.get(Vm, "vm-1") is None
-    assert db.get(Storage, "st-1") is None
     assert db.get(Network, "net-1") is None
     assert db.get(UserRef, uid) is None
     assert _login(client).status_code == 401

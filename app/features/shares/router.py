@@ -70,67 +70,6 @@ async def list_project_shares(
 
 
 @router.post(
-    "/projects/{project_id}/storages/{storage_id}/shares",
-    response_model=ShareOut,
-    status_code=status.HTTP_201_CREATED,
-    operation_id="share_storage",
-    summary="Partager un stockage",
-    responses=error_responses(*_CREATE),
-)
-async def share_storage(
-    project_id: str,
-    storage_id: str,
-    body: ShareCreateIn,
-    identity: Identity = Depends(get_current_identity),
-    iam: IamPort = Depends(get_iam),
-    db: Session = Depends(get_db),
-) -> ShareOut:
-    """Cree un partage actif depuis le projet d'origine du stockage."""
-    row = await service.create_share(
-        db,
-        iam,
-        user_id=identity.user_id,
-        project_id=project_id,
-        resource_type=ResourceType.STORAGE,
-        resource_id=storage_id,
-        dest_project_id=body.dest_project_id,
-    )
-    return ShareOut.model_validate(row)
-
-
-@router.get(
-    "/projects/{project_id}/storages/{storage_id}/shares",
-    response_model=Page[ShareOut],
-    operation_id="list_storage_shares",
-    summary="Lister les partages d'un stockage",
-    responses=error_responses(*_READ),
-)
-async def list_storage_shares(
-    project_id: str,
-    storage_id: str,
-    identity: Identity = Depends(get_current_identity),
-    iam: IamPort = Depends(get_iam),
-    db: Session = Depends(get_db),
-    params: PageParams = Depends(get_page_params),
-    share_status: ShareStatus | None = Query(default=None, alias="status"),
-    dest_project_id: str | None = Query(default=None),
-) -> Page[ShareOut]:
-    """Partages emis pour ce stockage, filtrables par etat et destinataire."""
-    rows, total = await service.list_for_resource(
-        db,
-        iam,
-        user_id=identity.user_id,
-        project_id=project_id,
-        resource_type=ResourceType.STORAGE,
-        resource_id=storage_id,
-        params=params,
-        status=share_status,
-        dest_project_id=dest_project_id,
-    )
-    return Page.build([ShareOut.model_validate(row) for row in rows], total, params)
-
-
-@router.post(
     "/projects/{project_id}/vms/{vm_id}/shares",
     response_model=ShareOut,
     status_code=status.HTTP_201_CREATED,

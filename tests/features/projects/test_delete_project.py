@@ -28,18 +28,16 @@ async def test_owner_deletes_project_and_its_vm(client, db, iam):
 
 
 async def test_owner_deletes_project_cascade(client, db, iam):
-    """La suppression du projet retire aussi ses VMs, stockages, reseaux et partages."""
+    """La suppression du projet retire aussi ses VMs, reseaux et partages."""
     from app.shared.enums import ShareStatus
     from app.shared.models.networks import Network
     from app.shared.models.shares import ResourceShare
-    from app.shared.models.storages import Storage
-    from tests.support import add_project, add_storage, own_project
+    from tests.support import add_project, own_project
 
     uid = await own_project(db, iam, "p1")
     await iam.create_project(uid, "p2")
     add_project(db, uid, "p2")
     add_vm(db, "p1", "vm-1")
-    add_storage(db, "p1", "st-1")
     db.add(Network(id="net-1", project_id="p1", name="lan"))
     db.add(
         ResourceShare(
@@ -57,7 +55,6 @@ async def test_owner_deletes_project_cascade(client, db, iam):
     assert response.status_code == 200
     assert db.get(Project, "p1") is None
     assert db.get(Vm, "vm-1") is None
-    assert db.get(Storage, "st-1") is None
     assert db.get(Network, "net-1") is None
     assert db.query(ResourceShare).count() == 0
 

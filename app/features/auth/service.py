@@ -5,7 +5,6 @@ import logging
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from app.application.ports.dns import DnsPort, DnsUnavailable
 from app.application.ports.hypervisor import HypervisorPort, HypervisorUnavailable
 from app.application.ports.iam import (
     GlobalRole,
@@ -16,7 +15,6 @@ from app.application.ports.iam import (
     UserNotFound,
 )
 from app.application.ports.network import NetworkPort, NetworkUnavailable
-from app.application.ports.storage import StoragePort, StorageUnavailable
 from app.core.audit import record_audit
 from app.core.errors import AppError, upstream_unavailable
 from app.features.projects.service import (
@@ -44,8 +42,6 @@ async def delete_account_cascade(
     iam: IamPort,
     hypervisor: HypervisorPort,
     network: NetworkPort,
-    dns: DnsPort,
-    storage: StoragePort,
     identity: Identity,
 ) -> None:
     """Supprime les projets possedes puis nettoie les appartenances et contributions.
@@ -63,8 +59,6 @@ async def delete_account_cascade(
                 db,
                 hypervisor,
                 network,
-                dns,
-                storage,
                 actor_id=identity.user_id,
                 project=project,
             )
@@ -134,7 +128,7 @@ async def delete_account_cascade(
     except AppError:
         db.rollback()
         raise
-    except (NetworkUnavailable, DnsUnavailable, HypervisorUnavailable, StorageUnavailable, KeyError):
+    except (NetworkUnavailable, HypervisorUnavailable, KeyError):
         db.rollback()
         raise upstream_unavailable("infrastructure") from None
     except IamError:

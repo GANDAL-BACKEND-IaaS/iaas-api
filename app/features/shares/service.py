@@ -14,17 +14,16 @@ from app.application.ports.network import NetworkPort, NetworkUnavailable
 from app.core.audit import record_audit
 from app.core.errors import AppError, ErrorCode, upstream_unavailable
 from app.core.pagination import PageParams, paginate
-from app.shared.enums import ResourceType, ShareStatus, StorageState, VmState
+from app.shared.enums import ResourceType, ShareStatus, VmState
 from app.shared.models.networks import Network, NetworkVm
 from app.shared.models.projects import Project
 from app.shared.models.shares import ResourceShare
-from app.shared.models.storages import Storage
 from app.shared.models.vms import Vm
 from app.shared.policies.access import ResourceView, authorize
 from app.shared.policies.visibility import is_resource_visible
 
-_RIGHT = {ResourceType.VM: "vm.share", ResourceType.STORAGE: "storage.share"}
-_VIEW_RIGHT = {ResourceType.VM: "vm.view", ResourceType.STORAGE: "storage.view"}
+_RIGHT = {ResourceType.VM: "vm.share"}
+_VIEW_RIGHT = {ResourceType.VM: "vm.view"}
 
 
 def visible_in_project(
@@ -52,18 +51,13 @@ def _project(db: Session, project_id: str) -> Project:
     return project
 
 
-def _load_resource(db: Session, resource_type: ResourceType, resource_id: str) -> Vm | Storage:
-    if resource_type == ResourceType.VM:
-        resource = db.get(Vm, resource_id)
-        missing = "VM introuvable."
-        deleting = VmState.DELETING.value
-    else:
-        resource = db.get(Storage, resource_id)
-        missing = "Stockage introuvable."
-        deleting = StorageState.DELETING.value
+def _load_resource(db: Session, resource_type: ResourceType, resource_id: str) -> Vm:
+    if resource_type != ResourceType.VM:
+        raise AppError(ErrorCode.NOT_FOUND, "Ressource introuvable.")
+    resource = db.get(Vm, resource_id)
     if resource is None:
-        raise AppError(ErrorCode.NOT_FOUND, missing)
-    if resource.state == deleting:
+        raise AppError(ErrorCode.NOT_FOUND, "VM introuvable.")
+    if resource.state == VmState.DELETING.value:
         raise AppError(ErrorCode.INVALID_STATE, "La ressource est en cours de suppression.")
     return resource
 
@@ -178,7 +172,7 @@ async def list_received(
         if not visible_types:
             raise AppError(
                 ErrorCode.FORBIDDEN,
-                "Droit requis manquant : vm.view ou storage.view.",
+                "Droit requis manquant : vm.view.",
             )
         statement = statement.where(ResourceShare.resource_type.in_(visible_types))
     statement = statement.where(ResourceShare.status == status.value)
@@ -230,7 +224,7 @@ def _drop_dest_links(db: Session, vm_id: str, dest_project_id: str) -> None:
 
 async def revoke_all_for_resource(
     db: Session,
-    network: NetworkPort | None,
+    network: NetworkPort,
     *,
     actor_id: str,
     resource_type: str,
@@ -238,7 +232,7 @@ async def revoke_all_for_resource(
 ) -> list[ResourceShare]:
     """Revoque tous les partages actifs d'une ressource. N'enregistre pas la transaction.
 
-    `network` n'est utilise que pour les VM ; un stockage peut passer None.
+    Une ressource VM partagee est detachee des reseaux de ses projets destinataires.
     """
     rows = list(
         db.scalars(
@@ -251,8 +245,6 @@ async def revoke_all_for_resource(
     )
     for row in rows:
         if row.resource_type == ResourceType.VM.value:
-            if network is None:
-                raise RuntimeError("Le detachement reseau d'une VM exige le port Reseau.")
             try:
                 await network.detach_vm_from_project(VmRef(row.resource_id), row.dest_project_id)
             except NetworkUnavailable:

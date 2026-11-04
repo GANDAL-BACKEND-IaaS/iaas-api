@@ -5,7 +5,7 @@ import pytest
 from app.core.errors import AppError, ErrorCode
 from app.features.requests.service import submit_request
 from app.shared.enums import RequestKind, RequestStatus
-from tests.support import add_pack, add_storage, add_vm, own_project
+from tests.support import add_pack, add_vm, own_project
 
 _CUSTOM = {
     "name": "web",
@@ -95,17 +95,6 @@ async def test_submit_without_membership_is_forbidden(db, iam):
     assert exc.value.code == ErrorCode.FORBIDDEN
 
 
-async def test_submit_storage_update_requires_target(db, iam):
-    """Une modification sans ressource cible est invalide."""
-    uid = await own_project(db, iam)
-    with pytest.raises(AppError) as exc:
-        await submit_request(
-            db, iam, author_id=uid, project_id="p1", kind=RequestKind.STORAGE_UPDATE,
-            payload={"size_gb": 10}, target_resource_id=None,
-        )
-    assert exc.value.code == ErrorCode.VALIDATION_ERROR
-
-
 async def test_submit_update_on_visible_vm(db, iam):
     """F2 : une modification de VM visible est enregistree."""
     uid = await own_project(db, iam)
@@ -119,13 +108,14 @@ async def test_submit_update_on_visible_vm(db, iam):
     assert row.payload["configuration"]["ram_gb"] == 4
 
 
-async def test_submit_rejects_deleting_storage(db, iam):
+async def test_submit_rejects_deleting_vm(db, iam):
     """Une ressource en cours de suppression ne peut pas etre modifiee."""
     uid = await own_project(db, iam)
-    add_storage(db, "p1", state="deleting")
+    add_vm(db, "p1", state="deleting")
     with pytest.raises(AppError) as exc:
         await submit_request(
-            db, iam, author_id=uid, project_id="p1", kind=RequestKind.STORAGE_UPDATE,
-            payload={"size_gb": 10}, target_resource_id="st-1",
+            db, iam, author_id=uid, project_id="p1", kind=RequestKind.VM_UPDATE,
+            payload={"configuration": {"ram_gb": 2, "vcpu": 2, "vram_gb": 0, "ssd_gb": 10}},
+            target_resource_id="vm-1",
         )
     assert exc.value.code == ErrorCode.INVALID_STATE

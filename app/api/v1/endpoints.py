@@ -11,7 +11,6 @@ from app.features.projects.router import router as projects_router
 from app.features.requests.router import router as requests_router
 from app.features.shares.router import extensions as shares_extensions
 from app.features.shares.router import router as shares_router
-from app.features.storages.router import router as storages_router
 from app.features.vms.router import router as vms_router
 
 router = APIRouter()
@@ -23,7 +22,6 @@ router.include_router(invitations)
 router.include_router(vms_router)
 router.include_router(packs_router)
 router.include_router(networks_router)
-router.include_router(storages_router)
 router.include_router(requests_router)
 router.include_router(shares_router)
 router.include_router(shares_extensions)

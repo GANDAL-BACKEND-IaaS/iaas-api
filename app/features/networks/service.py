@@ -19,7 +19,6 @@ from app.shared.deletion import DeletionOut, DeletionPreviewOut, expected_text, 
 from app.shared.enums import ResourceType, VmState
 from app.shared.models.networks import Network, NetworkVm
 from app.shared.models.projects import Project
-from app.shared.models.storages import Storage
 from app.shared.models.vms import Vm
 from app.shared.policies.access import authorize
 
@@ -174,8 +173,6 @@ async def attach_vm(
     await authorize(
         iam=iam, db=db, user_id=identity.user_id, project_id=project_id, required_right="vm.network"
     )
-    if db.get(Storage, vm_id) is not None:
-        raise AppError(ErrorCode.BAD_REQUEST, "Cet identifiant designe un stockage, pas une VM.")
     vm = db.get(Vm, vm_id)
     if vm is None or not visible_in_project(
         db,

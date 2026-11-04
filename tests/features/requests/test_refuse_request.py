@@ -16,8 +16,8 @@ async def test_admin_refuses_with_optional_note(db, iam):
     """Le refus n'exige pas de remarque et notifie l'auteur."""
     uid = await own_project(db, iam)
     row = await submit_request(
-        db, iam, author_id=uid, project_id="p1", kind=RequestKind.STORAGE_CREATE,
-        payload={"name": "docs", "size_gb": 10}, target_resource_id=None,
+        db, iam, author_id=uid, project_id="p1", kind=RequestKind.VM_CREATE,
+        payload=_CUSTOM, target_resource_id=None,
     )
     admin = await user_id(iam, "root@x.cm")
     notes = FakeNotifications()

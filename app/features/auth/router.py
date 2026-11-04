@@ -8,7 +8,6 @@ from collections.abc import Callable
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
-from app.application.ports.dns import DnsPort
 from app.application.ports.hypervisor import HypervisorPort
 from app.application.ports.iam import (
     EmailAlreadyUsed,
@@ -19,14 +18,11 @@ from app.application.ports.iam import (
     UserUpdate,
 )
 from app.application.ports.network import NetworkPort
-from app.application.ports.storage import StoragePort
 from app.core.database import get_db
 from app.core.dependencies import (
-    get_dns,
     get_hypervisor,
     get_iam,
     get_network,
-    get_storage,
     get_token_decoder,
 )
 from app.core.errors import ErrorCode, error_responses
@@ -193,14 +189,12 @@ async def delete_me(
     iam: IamPort = Depends(get_iam),
     hypervisor: HypervisorPort = Depends(get_hypervisor),
     network: NetworkPort = Depends(get_network),
-    dns: DnsPort = Depends(get_dns),
-    storage: StoragePort = Depends(get_storage),
     db: Session = Depends(get_db),
 ) -> Response:
     """Supprime le compte et ses projets, puis nettoie ses contributions."""
     try:
         await service.delete_account_cascade(
-            db, iam, hypervisor, network, dns, storage, identity
+            db, iam, hypervisor, network, identity
         )
     except UserNotFound:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Compte introuvable") from None

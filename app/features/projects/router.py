@@ -6,20 +6,16 @@ Les suppressions suivent le protocole commun en deux temps (section 1.5).
 from fastapi import APIRouter, Body, Depends, Query, Response, status
 from sqlalchemy.orm import Session
 
-from app.application.ports.dns import DnsPort
 from app.application.ports.hypervisor import HypervisorPort
 from app.application.ports.iam import IamPort, Identity
 from app.application.ports.network import NetworkPort
 from app.application.ports.notifications import NotificationsPort
-from app.application.ports.storage import StoragePort
 from app.core.database import get_db
 from app.core.dependencies import (
-    get_dns,
     get_hypervisor,
     get_iam,
     get_network,
     get_notifications,
-    get_storage,
 )
 from app.core.errors import ErrorCode, error_responses
 from app.core.pagination import Page, PageParams, get_page_params
@@ -148,8 +144,6 @@ async def delete_project(
     iam: IamPort = Depends(get_iam),
     hypervisor: HypervisorPort = Depends(get_hypervisor),
     network: NetworkPort = Depends(get_network),
-    dns: DnsPort = Depends(get_dns),
-    storage: StoragePort = Depends(get_storage),
     db: Session = Depends(get_db),
     body: DeletionIn = Body(default_factory=DeletionIn),
 ):
@@ -159,8 +153,6 @@ async def delete_project(
         iam,
         hypervisor,
         network,
-        dns,
-        storage,
         identity,
         project_id,
         body.confirmation_text,

@@ -14,7 +14,7 @@ from app.shared.time import utcnow
 
 
 class ResourceRequest(Base):
-    """Requete de creation ou de modification d'une VM ou d'un stockage."""
+    """Requete de creation ou de modification d'une VM."""
 
     __tablename__ = "resource_requests"
 

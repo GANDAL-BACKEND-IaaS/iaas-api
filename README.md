@@ -1,6 +1,6 @@
 # Backend IaaS
 
-Backend metier d'une plateforme IaaS. Les utilisateurs y gerent des projets contenant des VMs et des espaces de stockage, deposent des demandes traitees par des administrateurs, et partagent leurs ressources entre leurs projets.
+Backend metier d'une plateforme IaaS. Les utilisateurs y gerent des projets contenant des VMs, deposent des demandes traitees par des administrateurs, et partagent leurs ressources entre leurs projets.
 
 La specification de reference est [docs/conception-iaas-api.pdf](docs/conception-iaas-api.pdf). Elle prime sur toute autre description.
 
@@ -11,9 +11,8 @@ Tout le monde travaille sur la branche `develop`. Chaque developpeur ne modifie 
 | Developpeur | Port | Dossiers |
 | --- | --- | --- |
 | ZUCHUON | IAM | `app/application/ports/iam.py`, `app/infrastructure/iam/`, `app/features/auth/`, `app/features/profiles/`, `app/features/projects/`, `app/shared/models/projects.py` |
-| NAOMI | VM | `app/features/vms/`, `app/features/packs/`, `app/application/ports/hypervisor.py`, `app/application/ports/dns.py`, `app/infrastructure/hypervisor/`, `app/infrastructure/dns/`, `app/shared/models/vms.py`, `app/shared/models/packs.py` |
+| NAOMI | VM | `app/features/vms/`, `app/features/packs/`, `app/application/ports/hypervisor.py`, `app/infrastructure/hypervisor/`, `app/shared/models/vms.py`, `app/shared/models/packs.py` |
 | KOM | Reseau | `app/features/networks/`, `app/application/ports/network.py`, `app/infrastructure/network/`, `app/shared/models/networks.py` |
-| TABA | Espaces | `app/features/storages/`, `app/application/ports/storage.py`, `app/infrastructure/storage/`, `app/shared/models/storages.py` |
 
 Le socle partage (a ne modifier qu'ensemble) : `app/core/`, `app/api/`, `app/features/requests/`, `app/features/shares/`, `app/shared/policies/`, `app/shared/models/` hors fichiers nommes ci-dessus, `app/application/ports/notifications.py`, `app/infrastructure/notifications/`.
 
@@ -30,9 +29,9 @@ app/
   api/v1/admin.py              # Endpoints reserves aux administrateurs
   api/v1/endpoints.py          # Endpoints generaux
   core/                        # Config, base, erreurs, pagination, audit, jetons
-  application/ports/           # Contrats IAM, hyperviseur, reseau, stockage, DNS, notifications
+  application/ports/           # Contrats IAM, hyperviseur, reseau et notifications
   infrastructure/              # Mocks de ces ports
-  features/                    # auth, profiles, projects, vms, packs, networks, storages, requests, shares
+  features/                    # auth, profiles, projects, vms, packs, networks, requests, shares
   shared/models/               # Modele du domaine
   shared/policies/             # Controle d'acces (figure 3)
   shared/seed/                 # Droits, profils et packs de reference
@@ -75,7 +74,7 @@ Toutes les routes sont sous `/api/v1`.
 - Les suppressions suivent un protocole en deux temps : un premier appel sans corps renvoie `confirmation_required`, `confirmation_text` et `warning` ; le second appel doit renvoyer exactement `{"confirmation_text": "SUPPRIMER <nom>"}` et produit `{"deleted": true, ...}`. Un texte errone renvoie `400`, une ressource deja supprimee `404`, une panne externe `503` sans suppression locale.
 - Les actions d'alimentation renvoient `202` avec un etat transitoire (`starting`, `stopping`, `restarting`).
 - Les dates sont en ISO 8601 UTC avec suffixe `Z`.
-- Les identifiants d'objets sont des chaines UUID. Les unites sont explicites : RAM, VRAM et stockage en Go (`ram_gb`, `vram_gb`, `size_gb`, `ssd_gb`) et processeur en vCPU (`vcpu`).
+- Les identifiants d'objets sont des chaines UUID. Les unites sont explicites : RAM, VRAM et disque SSD des VMs en Go (`ram_gb`, `vram_gb`, `ssd_gb`) et processeur en vCPU (`vcpu`).
 
 ### Choix d'implementation
 
@@ -122,7 +121,7 @@ ruff check .
 ## Modele de droits (resume)
 
 - Un projet a un proprietaire (tous les droits) et des invites.
-- Les droits d'un membre sont definis une fois par projet et valent pour toutes les ressources du type : `vm.*`, `storage.*`, `project.invite`.
+- Les droits d'un membre sont definis une fois par projet et portent sur les VMs (`vm.*`) et les invitations (`project.invite`).
 - Un invite qui invite ne peut accorder que des droits inclus dans les siens.
 - Un partage rend une ressource visible dans un autre projet du meme proprietaire. Il ne transmet aucun droit.
 - Seules les creations et modifications passent par une demande. Les suppressions et actions directes n'en passent pas.

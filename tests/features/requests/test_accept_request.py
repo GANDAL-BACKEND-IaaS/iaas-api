@@ -14,7 +14,6 @@ from app.features.requests.service import (
 )
 from app.infrastructure.hypervisor.fake_hypervisor import FakeHypervisor
 from app.infrastructure.notifications.fake_notifications import FakeNotifications
-from app.infrastructure.storage.fake_storage import FakeStorage
 from app.shared.enums import RequestKind, RequestStatus
 from app.shared.models.requests import ResourceRequest
 from app.shared.models.vms import Vm
@@ -45,7 +44,6 @@ async def test_admin_accept_creates_vm(db, iam):
         request_id=row.id,
         note="ok",
         hypervisor=hypervisor,
-        storage=FakeStorage(),
         notifications=notes,
     )
     assert accepted.status == RequestStatus.ACCEPTED.value
@@ -61,7 +59,7 @@ async def test_user_cannot_accept(db, iam):
     with pytest.raises(AppError) as exc:
         await accept_request(
             db, actor_id=uid, actor_role=GlobalRole.USER, request_id=row.id, note=None,
-            hypervisor=FakeHypervisor(), storage=FakeStorage(), notifications=FakeNotifications(),
+            hypervisor=FakeHypervisor(), notifications=FakeNotifications(),
         )
     assert exc.value.code == ErrorCode.FORBIDDEN
 
@@ -75,7 +73,7 @@ async def test_missing_handler_does_not_accept(db, iam):
         with pytest.raises(AppError) as exc:
             await accept_request(
                 db, actor_id=admin, actor_role=GlobalRole.ADMIN, request_id=row.id, note=None,
-                hypervisor=FakeHypervisor(), storage=FakeStorage(), notifications=FakeNotifications(),
+                hypervisor=FakeHypervisor(), notifications=FakeNotifications(),
             )
         assert exc.value.code == ErrorCode.INTERNAL_ERROR
     finally:
@@ -97,7 +95,7 @@ async def test_upstream_failure_rolls_back(db, iam):
         with pytest.raises(AppError) as exc:
             await accept_request(
                 db, actor_id=admin, actor_role=GlobalRole.ADMIN, request_id=row.id, note=None,
-                hypervisor=FakeHypervisor(), storage=FakeStorage(), notifications=FakeNotifications(),
+                hypervisor=FakeHypervisor(), notifications=FakeNotifications(),
             )
         assert exc.value.code == ErrorCode.UPSTREAM_UNAVAILABLE
     finally:
@@ -113,11 +111,11 @@ async def test_cannot_accept_twice(db, iam):
     admin = await user_id(iam, "root@x.cm")
     await accept_request(
         db, actor_id=admin, actor_role=GlobalRole.ADMIN, request_id=row.id, note=None,
-        hypervisor=FakeHypervisor(), storage=FakeStorage(), notifications=FakeNotifications(),
+        hypervisor=FakeHypervisor(), notifications=FakeNotifications(),
     )
     with pytest.raises(AppError) as exc:
         await accept_request(
             db, actor_id=admin, actor_role=GlobalRole.ADMIN, request_id=row.id, note=None,
-            hypervisor=FakeHypervisor(), storage=FakeStorage(), notifications=FakeNotifications(),
+            hypervisor=FakeHypervisor(), notifications=FakeNotifications(),
         )
     assert exc.value.code == ErrorCode.INVALID_STATE

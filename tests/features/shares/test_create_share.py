@@ -5,7 +5,7 @@ import pytest
 from app.core.errors import AppError, ErrorCode
 from app.features.shares.service import create_share
 from app.shared.enums import ResourceType, ShareStatus
-from tests.support import add_project, add_storage, add_vm, own_project, user_id
+from tests.support import add_project, add_vm, own_project, user_id
 
 
 async def _two_projects(db, iam):
@@ -48,11 +48,11 @@ async def test_different_owners_are_forbidden(db, iam):
 async def test_same_project_is_conflict(db, iam):
     """Le destinataire doit etre un autre projet."""
     uid = await own_project(db, iam)
-    add_storage(db, "p1")
+    add_vm(db, "p1")
     with pytest.raises(AppError) as exc:
         await create_share(
-            db, iam, user_id=uid, resource_type=ResourceType.STORAGE, project_id="p1",
-            resource_id="st-1", dest_project_id="p1",
+            db, iam, user_id=uid, resource_type=ResourceType.VM, project_id="p1",
+            resource_id="vm-1", dest_project_id="p1",
         )
     assert exc.value.code == ErrorCode.CONFLICT
 

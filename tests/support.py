@@ -2,7 +2,6 @@
 
 from app.shared.models.packs import Pack
 from app.shared.models.projects import Membership, Project
-from app.shared.models.storages import Storage
 from app.shared.models.vms import Vm
 
 
@@ -61,21 +60,6 @@ def add_vm(db, project_id: str, vm_id: str = "vm-1", **kwargs) -> Vm:
     db.add(vm)
     db.commit()
     return vm
-
-
-def add_storage(db, project_id: str, storage_id: str = "st-1", **kwargs) -> Storage:
-    """Insere un espace de stockage dans son projet d'origine."""
-    storage = Storage(
-        id=storage_id,
-        origin_project_id=project_id,
-        name=kwargs.get("name", "docs"),
-        ip_address=kwargs.get("ip_address"),
-        size_gb=kwargs.get("size_gb", 100),
-        state=kwargs.get("state", "available"),
-    )
-    db.add(storage)
-    db.commit()
-    return storage
 
 
 def add_pack(db, name: str = "Standard", **kwargs) -> Pack:

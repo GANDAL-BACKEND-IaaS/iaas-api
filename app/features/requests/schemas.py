@@ -55,23 +55,6 @@ class VMUpdateRequestIn(BaseModel):
     configuration: VmConfigurationIn
 
 
-class StorageCreateRequestIn(BaseModel):
-    """Demande de creation : nom et taille en Go (F8)."""
-
-    model_config = ConfigDict(json_schema_extra={"examples": [{"name": "backup-alpha", "size_gb": 50}]})
-
-    name: str = Field(min_length=1, max_length=128)
-    size_gb: int = Field(ge=1)
-
-    _trim = field_validator("name")(_not_blank)
-
-
-class StorageUpdateRequestIn(BaseModel):
-    """Demande de modification de la taille, en Go (F9)."""
-
-    size_gb: int = Field(ge=1)
-
-
 class RequestDecisionIn(BaseModel):
     """Decision d'un administrateur. La remarque est optionnelle (R4)."""
 

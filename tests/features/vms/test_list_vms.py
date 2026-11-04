@@ -38,7 +38,7 @@ async def test_list_vms_forbidden_without_right(client, db, iam):
     """Un invite sans vm.view ne liste pas les VMs."""
     await own_project(db, iam)
     guest = iam.add_user("guest@x.cm", "pw")
-    await iam.invite_user(guest.user_id, "p1", ["storage.view"])
+    await iam.invite_user(guest.user_id, "p1", [])
     headers = await login_header(iam, "guest@x.cm")
     response = client.get("/api/v1/projects/p1/vms", headers=headers)
     assert response.status_code == 403

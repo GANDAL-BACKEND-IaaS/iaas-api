@@ -38,15 +38,35 @@ class Settings(BaseSettings):
     # greffe qui casse la suite au premier `git am` est une greffe qu on annule
     # sans la lire.
     #
-    # POURQUOI PAS « fake » PAR DEFAUT NON PLUS : « fake » RESSEMBLE a quelque
-    # chose. Un deploiement qui l oublierait compterait des quotas en memoire,
-    # remis a zero a chaque redemarrage, et personne ne le verrait — rien ne
-    # casse, les chiffres mentent. « off » ne compte rien et le DIT : au
-    # demarrage, et dans `/api/v1/health`.
+    # POURQUOI « gandal » PAR DEFAUT, ET PAS « off ».
     #
-    # L OBLIGATION EST DONC EXPLICITE : poser « gandal » avant la mise en
-    # service. Tant que c est « off », les quotas d IAM ne decident de rien.
-    decision_backend: str = "off"              # off | fake | gandal
+    # J AVAIS MIS « off », ET LE RAISONNEMENT ETAIT A L ENVERS. L argument
+    # etait : « gandal » par defaut ferait echouer la suite sur toute machine
+    # sans cle ni autorite, et une greffe qui casse les tests au premier essai
+    # est annulee sans etre lue. C est vrai — mais c est un probleme DES TESTS,
+    # pas de la production, et le resoudre en production etait la mauvaise
+    # moitie du compromis.
+    #
+    # UNE AUTORISATION QUI TOMBE EN PANNE **OUVERTE** EST PIRE QU UN SERVICE
+    # QUI REFUSE DE DEMARRER. Avec « off » par defaut, un deploiement qui
+    # oublie la variable sert toutes les routes SANS demander une seule
+    # decision et SANS compter un seul quota — et il le fait en silence, en
+    # repondant 200 a tout. Personne ne decouvre ca avant de manquer de place.
+    #
+    # Avec « gandal » par defaut, le meme oubli fait echouer les appels avec un
+    # 503 qui nomme la cause. Bruyant, immediat, et du bon cote.
+    #
+    # C EST DONC AUX TESTS DE DIRE QU ILS NE VEULENT PAS D IAM, et ils le font :
+    # « tests/conftest.py » pose DECISION_BACKEND=off avant tout import de
+    # « app ». 280 tests passent sans cle, sans autorite et sans reseau.
+    #
+    # « fake » n est jamais un defaut : il RESSEMBLE a quelque chose. Un
+    # deploiement qui l oublierait compterait des quotas en memoire, remis a
+    # zero a chaque redemarrage — rien ne casse, les chiffres mentent.
+    #
+    # « off » reste possible, et reste annonce : au demarrage, et dans
+    # « /api/v1/ready ». C est une sortie de secours explicite, plus un defaut.
+    decision_backend: str = "gandal"           # off | fake | gandal
     decision_url: str = "https://10.30.0.30:8081/v1"
     # Fichier à deux lignes (identifiant, secret), mode 600 — VERIFIE par la
     # bibliothèque : une clé lisible par les autres comptes n'est plus un secret.

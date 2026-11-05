@@ -37,16 +37,29 @@ def decision():
     app.dependency_overrides.pop(get_decision, None)
 
 
-def test_le_defaut_du_reglage_est_off():
-    """« off » doit etre INERTE, pas permissif par accident. La fabrique rend
-    alors None, et `authorize` le voit : il n a simplement pas d interlocuteur.
+def test_le_defaut_du_reglage_est_gandal():
+    """Le defaut doit etre SUR, et « off » n est pas sur.
 
-    On verifie le DEFAUT, parce que c est lui qui compte : un deploiement qui
-    oublie le reglage ne doit pas se retrouver avec des quotas en memoire
-    (« fake ») ni avec un service injoignable (« gandal »)."""
+    CE TEST DISAIT L INVERSE JUSQU AU 5 NOVEMBRE 2026, et il avait tort. Son
+    argument etait qu un deploiement qui oublie le reglage ne doit pas tomber
+    sur un service injoignable. Mais l autre branche de ce choix est pire : avec
+    « off », le meme oubli sert TOUTES les routes sans demander une seule
+    decision et sans compter un seul quota, en repondant 200 a tout. Une
+    autorisation qui tombe en panne OUVERTE est pire qu un service qui refuse
+    de demarrer.
+
+    C est donc aux TESTS de dire qu ils ne veulent pas d IAM, et « conftest.py »
+    le fait : DECISION_BACKEND=off, avant tout import de « app ».
+    """
+    import os
+
     from app.core.settings import Settings
 
-    assert Settings().decision_backend == "off"
+    # On lit le defaut de la CLASSE, pas l environnement de la suite — qui est
+    # justement pose a « off » par conftest.
+    assert Settings.model_fields["decision_backend"].default == "gandal"
+    assert os.environ.get("DECISION_BACKEND") == "off", (
+        "la suite doit tourner sans IAM : conftest pose la variable")
 
 
 def test_la_table_relie_chaque_droit_a_une_action_iam():

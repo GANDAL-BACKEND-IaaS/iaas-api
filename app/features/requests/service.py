@@ -24,6 +24,7 @@ from app.features.requests.schemas import (
     VMUpdateRequestIn,
 )
 from app.shared.enums import RequestKind, RequestStatus, ResourceType, VmState
+from app.shared.models.base import new_id
 from app.shared.models.packs import Pack
 from app.shared.models.projects import Project
 from app.shared.models.requests import ResourceRequest
@@ -272,24 +273,70 @@ def _ressources_de_quota(payload: dict) -> dict[str, int]:
     return {k: v for k, v in r.items() if v}
 
 
-async def accept_request(
+async def creer_en_libre_service(
     db: Session,
+    iam: IamPort,
     *,
-    actor_id: str,
-    actor_role: GlobalRole,
-    request_id: str,
-    note: str | None,
+    author_id: str,
+    project_id: str,
+    payload: dict,
     hypervisor: HypervisorPort,
     notifications: NotificationsPort,
-    # INJECTE, par mot-cle et avec un defaut : les appels positionnels
-    # existants — leurs tests compris — continuent de marcher a
-    # l identique, et « None » garde le comportement d avant.
     decision: DecisionPort | None = None,
 ) -> ResourceRequest:
-    """Accepte une demande sans la modifier, puis appelle le handler du kind (R3, F16)."""
-    _require_admin(actor_role)
-    row = _get_request(db, request_id)
-    _require_pending(row)
+    """Crée une VM SANS acceptation par un administrateur (R1, R2, R13).
+
+    POURQUOI CE CHEMIN EXISTE, ET POURQUOI IL REMPLACE L AUTRE POUR LES VM.
+    Faire valider chaque VM par un administrateur avait un sens quand rien ne
+    savait dire si l auteur y avait droit. IAM le sait : l administrateur a
+    valide le COMPTE et pose les QUOTAS, et c est tout ce qu il a a decider.
+    Lui redemander son avis a chaque machine, c est lui faire relire un calcul
+    que le service de decision vient de faire — et c est aussi la file
+    d attente ou un etudiant perd deux jours pour une VM de 2 vCPU.
+
+    LE QUOTA EST LA SEULE AUTORITE ICI. Si IAM accorde, la VM se cree. S il
+    refuse, le motif remonte tel quel : « il vous reste 0 vCPU sur 4 », et non
+    « demande en attente ».
+
+    CE QUI PASSE ENCORE PAR UNE DEMANDE : tout ce qui depasse le quota ou le
+    catalogue des profils. Une taille hors profil, un quota a relever, un GPU
+    de plus — la demande reste le bon endroit pour une EXCEPTION. Elle n est
+    plus le chemin normal.
+
+    LA TRACE N EST PAS PERDUE. Une ligne de demande est quand meme ecrite, deja
+    acceptee, avec « libre-service » en note : l audit et l historique voient
+    exactement ce qu ils voyaient avant, et « GET /requests » continue de rendre
+    la liste complete de ce qui a ete cree.
+    """
+    _require_project(db, project_id)
+    normalized, target_type, view = _prepare(
+        db, RequestKind.VM_CREATE, payload, None)
+    # LA DECISION D ABORD, AVANT D ECRIRE QUOI QUE CE SOIT. Ecrire la ligne
+    # puis demander ferait rester une demande orpheline a chaque refus.
+    await authorize(
+        decision=decision,
+        iam=iam,
+        db=db,
+        user_id=author_id,
+        project_id=project_id,
+        required_right=_RIGHT_FOR_KIND[RequestKind.VM_CREATE],
+        resource=view,
+    )
+    row = ResourceRequest(
+        id=new_id(),
+        project_id=project_id,
+        author_id=author_id,
+        kind=RequestKind.VM_CREATE.value,
+        payload=normalized,
+        target_resource_type=target_type,
+        target_resource_id=None,
+        status=RequestStatus.PENDING.value,
+        created_at=utcnow(),
+        updated_at=utcnow(),
+    )
+    db.add(row)
+    db.flush()
+
     handler = _HANDLERS.get(row.kind)
     if handler is None:
         raise AppError(
@@ -297,7 +344,42 @@ async def accept_request(
             f"Aucun traitement technique n'est enregistre pour {row.kind}.",
         )
     context = RequestContext(db=db, request=row, hypervisor=hypervisor)
+    # EXACTEMENT LE MEME CHEMIN QUE L ACCEPTATION : decision au nom de
+    # l auteur, quota retenu, handler, confirmation APRES l hyperviseur.
+    await _executer(db, row, context, handler, row.id, decision=decision)
 
+    row.status = RequestStatus.ACCEPTED.value
+    row.admin_note = "libre-service"
+    row.decided_at = utcnow()
+    row.updated_at = utcnow()
+    record_audit(
+        db,
+        actor_id=author_id,
+        action="vm.created_self_service",
+        entity_type="request",
+        entity_id=row.id,
+    )
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+async def _executer(
+    db: Session,
+    row: ResourceRequest,
+    context: RequestContext,
+    handler: Handler,
+    request_id: str,
+    *,
+    decision: DecisionPort | None,
+) -> None:
+    """Décide, retient le quota, lance le handler, confirme. Dans cet ordre.
+
+    EXTRAIT DE « accept_request » LE 5 NOVEMBRE 2026, pour que le LIBRE-SERVICE
+    passe exactement par ici. Recopier ces cent lignes dans un second chemin
+    les aurait fait diverger — et le jour de la divergence, l un des deux
+    compterait faux sans que personne ne le voie.
+    """
     # ─── LE QUOTA EST RETENU ICI, ET NULLE PART AILLEURS ────────────────────
     #
     # C est le moment ou la ressource vient a l existence. Le retenir au DEPOT de
@@ -378,6 +460,37 @@ async def accept_request(
             db.rollback()
             logger.exception("Echec du traitement de la demande %s", request_id)
             raise upstream_unavailable("infrastructure") from None
+
+
+
+async def accept_request(
+    db: Session,
+    *,
+    actor_id: str,
+    actor_role: GlobalRole,
+    request_id: str,
+    note: str | None,
+    hypervisor: HypervisorPort,
+    notifications: NotificationsPort,
+    # INJECTE, par mot-cle et avec un defaut : les appels positionnels
+    # existants — leurs tests compris — continuent de marcher a
+    # l identique, et « None » garde le comportement d avant.
+    decision: DecisionPort | None = None,
+) -> ResourceRequest:
+    """Accepte une demande sans la modifier, puis appelle le handler du kind (R3, F16)."""
+    _require_admin(actor_role)
+    row = _get_request(db, request_id)
+    _require_pending(row)
+    handler = _HANDLERS.get(row.kind)
+    if handler is None:
+        raise AppError(
+            ErrorCode.INTERNAL_ERROR,
+            f"Aucun traitement technique n'est enregistre pour {row.kind}.",
+        )
+    context = RequestContext(db=db, request=row, hypervisor=hypervisor)
+
+    await _executer(db, row, context, handler, request_id,
+                    decision=decision)
     row.status = RequestStatus.ACCEPTED.value
     row.admin_note = note
     row.decided_at = utcnow()

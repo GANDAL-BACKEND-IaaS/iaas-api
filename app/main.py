@@ -134,12 +134,16 @@ app.include_router(v1_router)
 # LE SERVICE DE DECISION EST BRANCHE AU DEMARRAGE, une fois. `authorize` le
 # retrouve par la — voir le commentaire de `access.py` sur ce compromis.
 # ON LE DIT FORT AU DEMARRAGE. Un backend qui ne compte aucun quota doit
-# l annoncer, pas le taire : « off » est un etat de transition, pas un reglage.
+# l annoncer, pas le taire : « off » est une sortie de secours EXPLICITE, pas un
+# defaut — le defaut est « gandal » depuis le 5 novembre 2026, parce qu une
+# autorisation qui tombe en panne ouverte est pire qu un service qui refuse de
+# demarrer.
 _reglage = get_settings().decision_backend
 if _reglage == "off":
     logging.getLogger("app").warning(
         "DECISION_BACKEND=off : AUCUNE decision IAM n est demandee et AUCUN quota "
-        "n est compte. A poser sur « gandal » avant la mise en service.")
+        "n est compte. C est un choix EXPLICITE — le defaut est « gandal ». "
+        "Retirer la variable pour revenir au comportement sur.")
 elif _reglage == "fake":
     logging.getLogger("app").warning(
         "DECISION_BACKEND=fake : quotas en MEMOIRE, remis a zero a chaque "

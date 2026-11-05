@@ -11,8 +11,15 @@ from app.application.ports.decision import DecisionPort
 from app.application.ports.hypervisor import HypervisorPort
 from app.application.ports.iam import IamPort, Identity
 from app.application.ports.network import NetworkPort
+from app.application.ports.notifications import NotificationsPort
 from app.core.database import get_db
-from app.core.dependencies import get_decision, get_hypervisor, get_iam, get_network
+from app.core.dependencies import (
+    get_decision,
+    get_hypervisor,
+    get_iam,
+    get_network,
+    get_notifications,
+)
 from app.core.errors import ErrorCode, error_responses
 from app.core.pagination import Page, PageParams, get_page_params
 from app.features.auth.dependencies import get_current_identity
@@ -52,6 +59,35 @@ async def request_create_vm(
 ) -> RequestOut:
     """F1 : depose une demande de creation. La VM n'existe qu'apres acceptation."""
     return await service.request_create_vm(db, iam, identity, project_id, body, decision=decision)
+
+
+@router.post(
+    "/direct",
+    response_model=RequestOut,
+    status_code=status.HTTP_201_CREATED,
+    operation_id="create_vm",
+    summary="Creer une VM tout de suite, si le quota le permet",
+    responses=error_responses(*_COMMON),
+)
+async def create_vm(
+    project_id: str,
+    body: VMCreateRequestIn,
+    identity: Identity = Depends(get_current_identity),
+    iam: IamPort = Depends(get_iam),
+    db: Session = Depends(get_db),
+    hypervisor: HypervisorPort = Depends(get_hypervisor),
+    notifications: NotificationsPort = Depends(get_notifications),
+    decision: DecisionPort | None = Depends(get_decision),
+) -> RequestOut:
+    """Cree la VM SANS acceptation : l administrateur a deja pose les quotas.
+
+    « POST "" » (request_create_vm) reste la, et reste le bon chemin pour une
+    EXCEPTION — une taille hors profil, un quota a relever. Il n est plus le
+    chemin du quotidien.
+    """
+    return await service.creer_vm(
+        db, iam, identity, project_id, body,
+        hypervisor=hypervisor, notifications=notifications, decision=decision)
 
 
 @router.get(

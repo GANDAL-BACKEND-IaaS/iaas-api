@@ -11,11 +11,12 @@ from app.application.ports.decision import DecisionPort
 from app.application.ports.hypervisor import HypervisorPort, HypervisorUnavailable, VmRef
 from app.application.ports.iam import IamPort, Identity
 from app.application.ports.network import NetworkPort, NetworkUnavailable
+from app.application.ports.notifications import NotificationsPort
 from app.core.audit import record_audit
 from app.core.errors import AppError, ErrorCode, upstream_unavailable
 from app.core.pagination import Page, PageParams, paginate
 from app.features.requests.schemas import RequestOut, VMCreateRequestIn, VMUpdateRequestIn
-from app.features.requests.service import submit_request
+from app.features.requests.service import creer_en_libre_service, submit_request
 from app.features.shares.service import revoke_all_for_resource, visible_in_project
 from app.features.vms.schemas import ConsoleOut, PowerOut, VMOut
 from app.shared.deletion import (
@@ -91,6 +92,40 @@ async def request_create_vm(
         payload=body.model_dump(),
         target_resource_id=None,
      decision=decision)
+    return RequestOut.model_validate(row)
+
+
+async def creer_vm(
+    db: Session,
+    iam: IamPort,
+    identity: Identity,
+    project_id: str,
+    body: VMCreateRequestIn,
+    *,
+    hypervisor: HypervisorPort,
+    notifications: NotificationsPort,
+    decision: DecisionPort | None = None,
+) -> RequestOut:
+    """Cree la VM TOUT DE SUITE si le quota le permet. Pas d acceptation.
+
+    L administrateur a valide le compte et pose les quotas ; c est tout ce
+    qu il avait a decider. Le reste, IAM le sait — et le lui redemander a
+    chaque machine, c est une file d attente pour rien.
+
+    « request_create_vm » reste disponible, et reste le bon chemin pour une
+    EXCEPTION : une taille hors profil, un quota a relever. Plus pour le
+    quotidien.
+    """
+    row = await creer_en_libre_service(
+        db,
+        iam,
+        author_id=identity.user_id,
+        project_id=project_id,
+        payload=body.model_dump(),
+        hypervisor=hypervisor,
+        notifications=notifications,
+        decision=decision,
+    )
     return RequestOut.model_validate(row)
 
 

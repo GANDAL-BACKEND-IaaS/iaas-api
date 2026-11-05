@@ -4,6 +4,7 @@ Point unique de branchement : les mocks seront remplaces par les vrais clients i
 sans toucher a la logique metier.
 """
 
+import shlex
 from collections.abc import Callable
 from datetime import timedelta
 from functools import lru_cache
@@ -16,6 +17,7 @@ from app.application.ports.notifications import NotificationsPort
 from app.core.settings import get_settings
 from app.core.tokens import decode_token
 from app.infrastructure.hypervisor.fake_hypervisor import FakeHypervisor
+from app.infrastructure.hypervisor.xcpng_hypervisor import XcpNgHypervisor
 from app.infrastructure.iam.fake_iam import FakeIamClient, stable_user_id
 from app.infrastructure.network.fake_network import FakeNetwork
 from app.infrastructure.notifications.fake_notifications import FakeNotifications
@@ -54,9 +56,45 @@ def get_iam() -> IamPort:
     return client
 
 
+def _ssh_coordinateur(settings) -> Callable[[list[str], float], tuple[int, str, str]]:
+    """L executeur SSH vers le coordinateur. Synchrone : il part dans un fil.
+
+    « BatchMode=yes » : jamais d invite de mot de passe. Un backend qui
+    attendrait une saisie se figerait sans que rien ne le dise.
+    """
+    import subprocess
+
+    base = [
+        "ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new",
+        "-o", f"ConnectTimeout={int(settings.decision_timeout_seconds) or 5}",
+        "-i", settings.hypervisor_cle_ssh,
+        f"{settings.hypervisor_utilisateur}@{settings.hypervisor_coordinateur}",
+    ]
+
+    def lancer(argv: list[str], delai: float) -> tuple[int, str, str]:
+        # LES ARGUMENTS SONT CITES UN PAR UN. Sans ca, un nom de VM contenant
+        # une espace ou un point-virgule deviendrait une seconde commande sur
+        # le coordinateur — qui tourne en root.
+        distant = shlex.join(argv)
+        r = subprocess.run(base + [distant], capture_output=True, text=True,
+                           timeout=delai)
+        return r.returncode, r.stdout, r.stderr
+
+    return lancer
+
+
 @lru_cache
 def get_hypervisor() -> HypervisorPort:
-    """Mock hyperviseur, remplace par le client XCP-ng au moment de l'integration."""
+    """Le simulateur, ou le vrai XCP-ng selon « HYPERVISOR_BACKEND »."""
+    settings = get_settings()
+    if settings.hypervisor_backend == "xcpng":
+        return XcpNgHypervisor(
+            _ssh_coordinateur(settings),
+            hote_par_defaut=settings.hypervisor_hote_defaut,
+            reseau_par_defaut=settings.hypervisor_reseau_defaut,
+            autorite_ssh=settings.hypervisor_autorite_ssh,
+            acces=settings.hypervisor_acces,
+        )
     return FakeHypervisor()
 
 

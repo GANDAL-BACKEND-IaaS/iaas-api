@@ -68,6 +68,29 @@ class Settings(BaseSettings):
     # « /api/v1/ready ». C est une sortie de secours explicite, plus un defaut.
     decision_backend: str = "gandal"           # off | fake | gandal
     decision_url: str = "https://10.30.0.30:8081/v1"
+    # ─── L HYPERVISEUR ──────────────────────────────────────────────────────
+    # « fake » : le simulateur en memoire, pour les tests et le developpement.
+    # « xcpng » : le vrai, par « gandal-ctl » sur le coordinateur.
+    #
+    # LE DEFAUT EST « fake », ET POUR UNE RAISON DIFFERENTE DE « off ».
+    # « off » cote decision etait dangereux parce qu il SERVAIT les routes sans
+    # verifier. Ici, « fake » ne sert personne : une VM creee dans le
+    # simulateur n existe nulle part, et ca se voit a la premiere connexion.
+    # C est une panne visible, pas une autorisation absente.
+    #
+    # Il faut en plus un acces SSH au coordinateur, qui n a rien a faire dans
+    # un defaut : une cle, un hote, un compte.
+    hypervisor_backend: str = "fake"           # fake | xcpng
+    # Le coordinateur du pool. C est LUI qui porte « gandal-ctl » et « xe ».
+    hypervisor_coordinateur: str = "192.168.123.100"
+    hypervisor_utilisateur: str = "root"
+    hypervisor_cle_ssh: str = "/etc/gandal/cle-coordinateur"
+    hypervisor_hote_defaut: str = "emilia"
+    hypervisor_reseau_defaut: str = "GESTION"
+    # L autorite SSH posee dans la graine des VM creees. Vide, les VM naissent
+    # avec une cle permanente et IAM n est jamais consulte pour y entrer.
+    hypervisor_autorite_ssh: str = "/etc/gandal-ssh-ca/autorite.pub"
+    hypervisor_acces: str = "cle+certificat"   # cle+certificat | certificat
     # Fichier à deux lignes (identifiant, secret), mode 600 — VERIFIE par la
     # bibliothèque : une clé lisible par les autres comptes n'est plus un secret.
     decision_key_file: str = "/etc/gandal/cle-iam"

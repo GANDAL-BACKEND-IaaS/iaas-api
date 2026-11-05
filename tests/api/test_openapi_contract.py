@@ -32,6 +32,26 @@ def test_every_operation_documents_output_and_errors():
                 assert "schema" in example or "examples" in example
 
 
+def test_validation_errors_are_documented_with_the_unified_envelope():
+    """Le 422 documente le meme corps que les autres erreurs, pas HTTPValidationError."""
+    schema = app.openapi()
+    documented = 0
+    for methods in schema["paths"].values():
+        for method, operation in methods.items():
+            if method not in {"get", "post", "patch", "put", "delete"}:
+                continue
+            response = operation["responses"].get("422")
+            if response is None:
+                continue
+            documented += 1
+            media = response["content"]["application/json"]
+            assert media["schema"].get("$ref") != "#/components/schemas/HTTPValidationError"
+            assert "validation_error" in media.get("examples", {})
+
+    assert documented > 0
+    assert "HTTPValidationError" not in schema.get("components", {}).get("schemas", {})
+
+
 def test_error_component_shape_is_stable():
     """Les exemples d'erreur exposent code et message."""
     schema = app.openapi()

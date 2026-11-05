@@ -37,5 +37,9 @@ def health(db: Session = Depends(get_db)) -> HealthOut:
     return HealthOut(status="ok")
 
 
-router.include_router(admin_router)
-router.include_router(endpoints_router)
+# Toutes les routes exposent le meme enveloppe d'erreur, y compris pour les 422
+# produits par la validation FastAPI (au lieu du schema HTTPValidationError par defaut).
+_validation_error = error_responses(ErrorCode.VALIDATION_ERROR)
+
+router.include_router(admin_router, responses=_validation_error)
+router.include_router(endpoints_router, responses=_validation_error)

@@ -69,7 +69,7 @@ Toutes les routes sont sous `/api/v1`.
 - Chaque corps de requete est un schema Pydantic.
 - Chaque succes a un `response_model` (sauf `204`).
 - Les listes sont des pages : `items`, `page`, `page_size`, `total_items`, `total_pages`. Une page vide renvoie `200` avec `items: []` et `total_pages: 0`.
-- Toute erreur a la forme `{"error": {"code": "...", "message": "...", "details": ...}}`, avec `details` toujours present.
+- Toute erreur a la forme `{"error": {"code": "...", "message": "...", "details": ...}}`, avec `details` toujours present. Les `422` de validation sont documentes avec cette meme enveloppe, pas avec `HTTPValidationError`.
 - Les codes stables sont `unauthorized`, `forbidden`, `not_found`, `conflict`, `validation_error`, `bad_request`, `invalid_state`, `upstream_unavailable`, `internal_error`.
 - Les suppressions suivent un protocole en deux temps : un premier appel sans corps renvoie `confirmation_required`, `confirmation_text` et `warning` ; le second appel doit renvoyer exactement `{"confirmation_text": "SUPPRIMER <nom>"}` et produit `{"deleted": true, ...}`. Un texte errone renvoie `400`, une ressource deja supprimee `404`, une panne externe `503` sans suppression locale.
 - Les actions d'alimentation renvoient `202` avec un etat transitoire (`starting`, `stopping`, `restarting`).

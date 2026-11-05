@@ -80,7 +80,7 @@ Exemple d'erreur de validation :
 
 ### 1.5 Suppression avec texte de confirmation
 
-La suppression d'une **VM, d'un projet, d'un stockage ou d'un réseau** se fait toujours en deux appels sur la même route `POST .../deletion`. Il ne s'agit pas d'une demande de suppression soumise à l'administrateur.
+La suppression d'une **VM, d'un projet ou d'un réseau** se fait toujours en deux appels sur la même route `POST .../deletion`. Il ne s'agit pas d'une demande de suppression soumise à l'administrateur.
 
 1. **Prévisualisation** : le frontend envoie la route avec `{}` (ou sans `confirmation_text`). Le backend ne supprime rien et répond `200 OK` avec un avertissement et une chaîne `confirmation_text`.
 2. **Confirmation** : le frontend renvoie exactement la valeur de `confirmation_text` dans le même champ. Le backend compare la chaîne à la valeur attendue pour cette ressource. Si elle correspond, il effectue la suppression et répond `200 OK` avec `deleted: true`. Sinon il répond `400 bad_request`, sans suppression.
@@ -169,7 +169,7 @@ Les noms ci-dessous définissent les contrats de réponse et les corps utilisés
   "user_id": "usr-456",
   "role": "guest",
   "profile_id": 2,
-  "rights": ["vm.view", "storage.view"],
+  "rights": ["vm.view"],
   "joined_at": "2026-10-16T10:00:00Z"
 }
 ```
@@ -199,7 +199,7 @@ Les noms ci-dessous définissent les contrats de réponse et les corps utilisés
 
 ### 2.3 Ressources matérielles, adresse IP comprise
 
-L'adresse IP est un attribut de première classe de la VM et du stockage. Les deux modèles ci-dessous l'exposent sous le nom stable `ip_address`. La valeur est une chaîne IPv4 ou IPv6 ; elle vaut `null` si l'adresse n'a pas encore été attribuée ou si le fournisseur ne l'a pas encore retournée. Les unités des ressources matérielles sont explicites : RAM, VRAM et SSD en Go, CPU en nombre de vCPU.
+L'adresse IP est un attribut de première classe de la VM. Le modèle ci-dessous l'expose sous le nom stable `ip_address`. La valeur est une chaîne IPv4 ou IPv6 ; elle vaut `null` si l'adresse n'a pas encore été attribuée ou si le fournisseur ne l'a pas encore retournée. Les unités des ressources matérielles sont explicites : RAM, VRAM et SSD en Go, CPU en nombre de vCPU.
 
 `VMOut` :
 
@@ -221,23 +221,6 @@ L'adresse IP est un attribut de première classe de la VM et du stockage. Les de
 
 Valeurs possibles de `state` : `pending`, `creating`, `stopped`, `running`, `deleting`, `error`. Une valeur inconnue du backend est exposée comme `unknown`, sans être transformée en état de réussite.
 
-`StorageOut` :
-
-```json
-{
-  "id": "st-456",
-  "origin_project_id": "prj-alpha",
-  "name": "backup-alpha",
-  "ip_address": "192.0.2.80",
-  "size_gb": 50,
-  "state": "available",
-  "shared": false,
-  "created_at": "2026-10-15T09:24:02Z"
-}
-```
-
-`ip_address` désigne l'adresse IP associée au stockage.
-
 `NetworkOut` :
 
 ```json
@@ -250,7 +233,7 @@ Valeurs possibles de `state` : `pending`, `creating`, `stopped`, `running`, `del
 }
 ```
 
-Un réseau ne contient que des VM visibles dans son projet. Les stockages ne sont jamais membres d'un réseau.
+Un réseau ne contient que des VM visibles dans son projet.
 
 ### 2.4 Demande et partage
 
@@ -261,9 +244,9 @@ Un réseau ne contient que des VM visibles dans son projet. Les stockages ne son
   "id": 12,
   "project_id": "prj-alpha",
   "author_id": "usr-123",
-  "kind": "storage_create",
+  "kind": "vm_create",
   "status": "pending",
-  "payload": { "name": "backup-alpha", "size_gb": 50 },
+  "payload": { "name": "web-02", "pack_id": "pack-standard" },
   "target_resource_type": null,
   "target_resource_id": null,
   "admin_note": null,
@@ -273,7 +256,7 @@ Un réseau ne contient que des VM visibles dans son projet. Les stockages ne son
 }
 ```
 
-`kind` vaut `vm_create`, `vm_update`, `storage_create` ou `storage_update`.
+`kind` vaut `vm_create` ou `vm_update`.
 `status` vaut `pending`, `accepted`, `refused` ou `cancelled`. `payload` est typé selon `kind`; une réponse de demande de VM acceptée peut aussi préciser la ressource résultante dans `target_resource_id`.
 
 `ShareOut` :
@@ -281,8 +264,8 @@ Un réseau ne contient que des VM visibles dans son projet. Les stockages ne son
 ```json
 {
   "id": "shr-123",
-  "resource_type": "storage",
-  "resource_id": "st-456",
+  "resource_type": "vm",
+  "resource_id": "vm-123",
   "origin_project_id": "prj-alpha",
   "dest_project_id": "prj-beta",
   "created_by": "usr-123",
@@ -291,7 +274,7 @@ Un réseau ne contient que des VM visibles dans son projet. Les stockages ne son
 }
 ```
 
-`resource_type` vaut `vm` ou `storage`; `status` vaut `active` ou `revoked`.
+`resource_type` vaut `vm`; `status` vaut `active` ou `revoked`.
 Le partage est immédiat, ne transmet aucun droit et ne peut pas être réactivé après révocation.
 
 ### 2.5 Pack et pagination
@@ -326,11 +309,12 @@ Le partage est immédiat, ne transmet aucun droit et ne peut pas être réactiv�
 
 ## 3. Catalogue compact
 
-Toutes les suppressions de projet, VM, stockage et réseau emploient `POST .../deletion` en deux temps (§1.5). Aucun endpoint de console n'est inclus.
+Toutes les suppressions de projet, VM et réseau emploient `POST .../deletion` en deux temps (§1.5). L'endpoint de console est conservé.
 
 | Méthode | Route exacte | Fonction |
 |---|---|---|
 | POST | `/api/v1/auth/login` | Connexion |
+| POST | `/api/v1/auth/register` | Créer un compte |
 | GET | `/api/v1/auth/me` | Lire son identité |
 | PATCH | `/api/v1/auth/me` | Modifier son compte |
 | DELETE | `/api/v1/auth/me` | Supprimer son compte IAM |
@@ -340,6 +324,9 @@ Toutes les suppressions de projet, VM, stockage et réseau emploient `POST .../d
 | POST | `/api/v1/admin/profiles` | Créer un profil |
 | PATCH | `/api/v1/admin/profiles/{profile_id}` | Modifier un profil |
 | DELETE | `/api/v1/admin/profiles/{profile_id}` | Supprimer un profil |
+| POST | `/api/v1/admin/admins` | Créer un administrateur |
+| GET | `/api/v1/admin/users` | Lister les utilisateurs |
+| GET | `/api/v1/admin/users/{user_id}/overview` | Consulter les données opérationnelles d'un utilisateur |
 | GET | `/api/v1/projects` | Lister les projets |
 | POST | `/api/v1/projects` | Créer un projet |
 | GET | `/api/v1/projects/{project_id}` | Lire un projet |
@@ -355,11 +342,14 @@ Toutes les suppressions de projet, VM, stockage et réseau emploient `POST .../d
 | POST | `/api/v1/invitations/{invitation_id}/refuse` | Refuser une invitation |
 | POST | `/api/v1/invitations/{invitation_id}/cancel` | Annuler une invitation |
 | GET | `/api/v1/projects/{project_id}/shares` | Lister les partages reçus dans un projet |
+| GET | `/api/v1/shares` | Lister ses partages (extension) |
+| GET | `/api/v1/shares/{share_id}` | Lire un partage (extension) |
 | POST | `/api/v1/projects/{project_id}/vms` | Demander la création d'une VM |
 | GET | `/api/v1/projects/{project_id}/vms` | Lister les VM visibles |
 | GET | `/api/v1/projects/{project_id}/vms/{vm_id}` | Lire une VM |
 | POST | `/api/v1/projects/{project_id}/vms/{vm_id}/update-requests` | Demander la modification d'une VM |
 | POST | `/api/v1/projects/{project_id}/vms/{vm_id}/power` | Démarrer/arrêter/redémarrer une VM |
+| POST | `/api/v1/projects/{project_id}/vms/{vm_id}/console` | Ouvrir une console de VM |
 | POST | `/api/v1/projects/{project_id}/vms/{vm_id}/deletion` | Prévisualiser/confirmer suppression VM |
 | POST | `/api/v1/projects/{project_id}/networks` | Créer un réseau |
 | GET | `/api/v1/projects/{project_id}/networks` | Lister les réseaux |
@@ -368,13 +358,6 @@ Toutes les suppressions de projet, VM, stockage et réseau emploient `POST .../d
 | POST | `/api/v1/projects/{project_id}/networks/{network_id}/vms` | Rattacher une VM au réseau |
 | DELETE | `/api/v1/projects/{project_id}/networks/{network_id}/vms/{vm_id}` | Détacher une VM du réseau |
 | POST | `/api/v1/projects/{project_id}/networks/{network_id}/deletion` | Prévisualiser/confirmer suppression réseau |
-| POST | `/api/v1/projects/{project_id}/storages` | Demander la création d'un stockage |
-| GET | `/api/v1/projects/{project_id}/storages` | Lister les stockages |
-| GET | `/api/v1/projects/{project_id}/storages/{storage_id}` | Lire un stockage |
-| POST | `/api/v1/projects/{project_id}/storages/{storage_id}/update-requests` | Demander la modification d'un stockage |
-| POST | `/api/v1/projects/{project_id}/storages/{storage_id}/deletion` | Prévisualiser/confirmer suppression stockage |
-| POST | `/api/v1/projects/{project_id}/storages/{storage_id}/shares` | Créer un partage de stockage |
-| GET | `/api/v1/projects/{project_id}/storages/{storage_id}/shares` | Lister les partages d'un stockage |
 | POST | `/api/v1/projects/{project_id}/vms/{vm_id}/shares` | Créer un partage de VM |
 | GET | `/api/v1/projects/{project_id}/vms/{vm_id}/shares` | Lister les partages d'une VM |
 | POST | `/api/v1/shares/{share_id}/revoke` | Révoquer un partage |
@@ -389,7 +372,7 @@ Toutes les suppressions de projet, VM, stockage et réseau emploient `POST .../d
 | PATCH | `/api/v1/admin/packs/{pack_id}` | Modifier un pack |
 | DELETE | `/api/v1/admin/packs/{pack_id}` | Supprimer un pack |
 
-Les ressources de projet (membres, invitations, VM et stockage) sont listées dans leurs propres routes ; un endpoint agrégé `/resources` n'est pas retenu pour éviter deux contrats de visibilité/pagination.
+Les ressources de projet (membres, invitations et VM) sont listées dans leurs propres routes ; un endpoint agrégé `/resources` n'est pas retenu pour éviter deux contrats de visibilité/pagination.
 
 ## 4. Authentification, compte et droits
 
@@ -557,7 +540,7 @@ Les ressources de projet (membres, invitations, VM et stockage) sont listées da
 
 - Accès : propriétaire.
 - Paramètre : `project_id`.
-- Corps phase 1 : `{}`. Réponse `200 OK` : modèle commun de prévisualisation ; `confirmation_text` est `SUPPRIMER <nom du projet>`. L'avertissement précise le nombre de VM, stockages, réseaux et partages affectés.
+- Corps phase 1 : `{}`. Réponse `200 OK` : modèle commun de prévisualisation ; `confirmation_text` est `SUPPRIMER <nom du projet>`. L'avertissement précise le nombre de VM, réseaux et partages affectés.
 - Corps phase 2 : `{"confirmation_text": "SUPPRIMER Projet alpha"}` avec la chaîne exacte reçue à l'étape 1.
 - Réponse phase 2 `200 OK` :
 
@@ -741,12 +724,12 @@ Les routes de VM incluent l'adresse IP `ip_address` dans toutes les réponses `V
 
 - Accès : propriétaire ou invité avec `vm.delete`.
 - Corps et réponses : protocole §1.5. Phase 1 donne `confirmation_text` du type `SUPPRIMER web-01`; phase 2 reçoit exactement cette valeur et répond au succès avec `resource_type: "vm"`.
-- Avant succès, révoque les partages, retire la VM de tous ses réseaux et demande au service DNS tiers la suppression du nom de domaine associé. Ces effets sont orchestrés en interne.
+- Avant succès, révoque les partages et retire la VM de tous ses réseaux. Ces effets sont orchestrés en interne.
 - Erreurs : `400`, `401`, `403`, `404`, `409 invalid_state`, `503` dépendance indisponible. En cas d'échec, aucune réponse `deleted: true`.
 
 ## 7. Réseaux
 
-Base : `/api/v1/projects/{project_id}/networks`. Écriture : propriétaire ou `vm.network`. Lecture : propriétaire ou `vm.view` ou `vm.network`. Le réseau peut relier les VM originaires du projet et les VM partagées activement vers ce projet. Il est impossible d'y rattacher un stockage.
+Base : `/api/v1/projects/{project_id}/networks`. Écriture : propriétaire ou `vm.network`. Lecture : propriétaire ou `vm.view` ou `vm.network`. Le réseau peut relier les VM originaires du projet et les VM partagées activement vers ce projet.
 
 ### `POST /api/v1/projects/{project_id}/networks`
 
@@ -783,7 +766,7 @@ Base : `/api/v1/projects/{project_id}/networks`. Écriture : propriétaire ou `v
 - Corps `NetworkMembershipIn` : `{"vm_id": "vm-123"}`.
 - La VM doit être visible dans le projet. Ajout idempotent.
 - Réponse `200 OK` : `NetworkOut` à jour.
-- Erreurs : `400` ID identifié comme stockage, `401`, `403`, `404`, `409 invalid_state` VM en suppression, `422`, `503`.
+- Erreurs : `401`, `403`, `404`, `409 invalid_state` VM en suppression, `422`, `503`.
 
 ### `DELETE /api/v1/projects/{project_id}/networks/{network_id}/vms/{vm_id}`
 
@@ -802,91 +785,21 @@ Base : `/api/v1/projects/{project_id}/networks`. Écriture : propriétaire ou `v
 
 Les fonctions d'intégration réseau (détachement à la suppression VM/projet ou à la révocation d'un partage) sont des services internes, pas des routes HTTP.
 
-## 8. Stockages
-
-Base : `/api/v1/projects/{project_id}/storages`. Écriture/lecture selon les droits `storage.*` dans le projet. `StorageOut` comprend toujours `ip_address` (§2.3), y compris dans les éléments paginés.
-
-### `POST /api/v1/projects/{project_id}/storages` — Demander une création
-
-- Accès : propriétaire ou invité avec `storage.request_create`.
-- Corps `StorageCreateRequestIn` :
-
-  ```json
-  { "name": "backup-alpha", "size_gb": 50 }
-  ```
-
-- `name` : 1–128 caractères après trim et non blanc. `size_gb` : entier strictement positif. Le stockage n'existe pas avant acceptation de la demande ; son adresse IP est inconnue à ce stade.
-- Réponse `201 Created` : `RequestOut`, `kind: "storage_create"`, `status: "pending"`, payload reprenant `name` et `size_gb`.
-- Erreurs : `401`, `403`, `404` projet, `422`.
-
-### `GET /api/v1/projects/{project_id}/storages`
-
-- Accès : propriétaire ou invité avec `storage.view`.
-- Query :
-  - pagination commune ;
-  - `state` optionnel : `available` ou `deleting` ;
-  - `shared` optionnel : `true` uniquement les partages reçus, `false` uniquement les ressources d'origine ;
-  - `ip_address` optionnel : adresse exacte IPv4/IPv6 ;
-  - `name` optionnel : préfixe insensible à la casse.
-  Les filtres se combinent en ET. Tri par `name` puis `id`, ascendant.
-- Corps : aucun.
-- Réponse `200 OK` : `Page[StorageOut]`; `ip_address` vaut `null` si pas encore fournie. Les partages révoqués sont exclus.
-- Erreurs : `401`, `403`, `404` projet, `422`.
-
-### `GET /api/v1/projects/{project_id}/storages/{storage_id}`
-
-- Accès : propriétaire ou invité avec `storage.view`; stockage visible dans le projet de l'URL.
-- Corps : aucun.
-- Réponse `200 OK` : `StorageOut`, avec `ip_address`.
-- Erreurs : `401`, `403`, `404`.
-
-### `POST /api/v1/projects/{project_id}/storages/{storage_id}/update-requests`
-
-- Accès : propriétaire ou invité avec `storage.request_update`.
-- Corps `StorageUpdateRequestIn` : `{"size_gb": 200}` ; entier strictement positif.
-- Réponse `202 Accepted` : `RequestOut` (`kind: "storage_update"`, `status: "pending"`, `target_resource_type: "storage"`, `target_resource_id: "{storage_id}"`). La taille actuelle n'est pas modifiée.
-- Erreurs : `400` taille identique à l'actuelle, `401`, `403`, `404`, `409 conflict` demande déjà en attente (retourner son `request_id` dans `details`), `409 invalid_state` stockage en suppression, `422`.
-
-### `POST /api/v1/projects/{project_id}/storages/{storage_id}/deletion`
-
-- Accès : propriétaire ou invité avec `storage.delete`.
-- Corps/réponses : protocole §1.5. Phase 1 renvoie une chaîne formée avec le nom du stockage et un avertissement indiquant que les données seront perdues, même si le stockage est non vide, et le nombre de partages actifs révoqués.
-- Phase 2 : texte exact dans `confirmation_text`.
-- Réponse phase 2 `200 OK` : commune, `resource_type: "storage"`.
-- Effets : suppression auprès du fournisseur, révocation de tous les partages.
-- Erreurs : `400`, `401`, `403`, `404`, `503`. Si le fournisseur échoue, rien n'est marqué supprimé localement.
-
-## 9. Partages
+## 8. Partages
 
 Un partage rend une ressource visible dans un autre projet du même propriétaire. Il est actif dès sa création, ne transmet aucun droit et n'a pas de plafond de ressources. Un partage révoqué n'est jamais réactivé : il faut en créer un autre.
 
 ### `GET /api/v1/projects/{project_id}/shares` — Partages reçus par un projet
 
-- Accès : membre du projet. Les détails d'une ressource ne sont retournés que si l'appelant possède aussi le droit de lecture correspondant (`vm.view` ou `storage.view`).
-- Query : pagination commune ; filtre `resource_type` optionnel (`vm` ou `storage`) ; filtre `status` optionnel (`active` ou `revoked`). Par défaut, `status=active`. Filtres combinés en ET ; tri par `created_at` décroissant.
+- Accès : membre du projet. Les détails d'une ressource ne sont retournés que si l'appelant possède aussi le droit `vm.view`.
+- Query : pagination commune ; filtre `resource_type` optionnel (seule valeur utile : `vm`) ; filtre `status` optionnel (`active` ou `revoked`). Par défaut, `status=active`. Filtres combinés en ET ; tri par `created_at` décroissant.
 - Corps : aucun.
 - Réponse `200 OK` : `Page[ShareOut]` des partages dont `dest_project_id` correspond au projet de la route.
 - Erreurs : `401`, `403`, `404` projet, `422`.
 
-### `POST /api/v1/projects/{project_id}/storages/{storage_id}/shares`
-
-- Accès : propriétaire ou invité avec `storage.share` dans le projet d'origine ; l'appelant doit être membre du projet destinataire.
-- `{project_id}` doit être le projet d'origine du stockage.
-- Corps `ShareCreateIn` : `{"dest_project_id": "prj-beta"}`.
-- Réponse `201 Created` : `ShareOut`, état `active`.
-- Erreurs : `400` mauvais projet d'origine (détail `origin_project_id`), `401`, `403` droit/membership/propriétaire incompatibles, `404`, `409` partage actif déjà existant ou projet destinataire identique à l'origine, `409 invalid_state` stockage en suppression, `422`.
-
-### `GET /api/v1/projects/{project_id}/storages/{storage_id}/shares`
-
-- Accès : propriétaire ou invité avec `storage.view`.
-- Query : pagination commune ; filtre `status` facultatif, `active` ou `revoked`; `dest_project_id` facultatif pour ne retenir que les partages vers ce projet. Filtres combinés en ET ; tri par `created_at` décroissant.
-- Corps : aucun.
-- Réponse `200 OK` : `Page[ShareOut]`.
-- Erreurs : `401`, `403`, `404`, `422`.
-
 ### `POST /api/v1/projects/{project_id}/vms/{vm_id}/shares`
 
-- Mêmes paramètres de chemin et corps que le partage stockage.
+- Corps `ShareCreateIn` : `{"dest_project_id": "prj-beta"}`.
 - Accès : propriétaire ou invité avec `vm.share` dans le projet d'origine et membre du destinataire.
 - Réponse `201 Created` : `ShareOut`, `resource_type: "vm"`.
 - Erreurs : `400`, `401`, `403`, `404`, `409` partage déjà actif ou VM en suppression, `422`.
@@ -909,10 +822,10 @@ Un partage rend une ressource visible dans un autre projet du même propriétair
   { "share": { "id": "shr-123", "status": "revoked" }, "message": "Le partage a été révoqué." }
   ```
 
-- Une VM partagée est retirée des réseaux du projet destinataire avant la révocation effective. Un stockage partagé disparaît immédiatement de la liste de ce projet.
+- Une VM partagée est retirée des réseaux du projet destinataire avant la révocation effective.
 - Erreurs : `401`, `403`, `404`, `409 invalid_state` déjà révoqué, `503` détachement externe impossible (partage conservé actif).
 
-## 10. Demandes
+## 9. Demandes
 
 Une demande porte toujours sur un projet. Seules la création et la modification de ressources passent par ce mécanisme. Un administrateur accepte ou refuse la demande sans la modifier ; la remarque de décision est facultative.
 
@@ -922,7 +835,7 @@ Une demande porte toujours sur un projet. Seules la création et la modification
 - Query :
   - pagination commune ;
   - `status` facultatif parmi `pending`, `accepted`, `refused`, `cancelled` ;
-  - `kind` facultatif parmi `vm_create`, `vm_update`, `storage_create`, `storage_update` ;
+  - `kind` facultatif parmi `vm_create`, `vm_update` ;
   - `project_id` facultatif : identifiant exact d'un projet auquel l'utilisateur a accès ; ignoré pour `admin` seulement si non fourni, jamais si invalide ;
   - `author_id` facultatif, administrateur uniquement.
   Filtres combinés en ET. Tri `created_at` décroissant puis `id` décroissant.
@@ -954,7 +867,7 @@ Une demande porte toujours sur un projet. Seules la création et la modification
   ```
 
   `note` est facultatif, maximum 1000 caractères ; `{}` est valide.
-- Réponse `200 OK` : `RequestOut` avec `status: "accepted"`, `admin_note` et `decided_at`. Pour une création, `target_resource_id` référence la ressource créée. Une VM/un stockage reçoit ses attributs `ip_address` dès qu'ils sont disponibles.
+- Réponse `200 OK` : `RequestOut` avec `status: "accepted"`, `admin_note` et `decided_at`. Pour une création, `target_resource_id` référence la ressource créée. Une VM reçoit ses attributs `ip_address` dès qu'ils sont disponibles.
 - Erreurs : `401`, `403`, `404`, `409` demande non pending, `503` système externe indisponible (demande demeure pending).
 
 ### `POST /api/v1/requests/{request_id}/refuse`
@@ -964,7 +877,7 @@ Une demande porte toujours sur un projet. Seules la création et la modification
 - Réponse `200 OK` : `RequestOut` avec `status: "refused"`, `admin_note` et `decided_at`.
 - Erreurs : `401`, `403`, `404`, `409` demande non pending.
 
-## 11. Packs
+## 10. Packs
 
 ### `GET /api/v1/packs`
 
@@ -1015,16 +928,15 @@ Une demande porte toujours sur un projet. Seules la création et la modification
 - Réponse `204 No Content`, corps vide.
 - Erreurs : `401`, `403`, `404`, `409` si une demande pending dépend de ce pack.
 
-## 12. Droits métier
+## 11. Droits métier
 
 - VM : `vm.view`, `vm.console`, `vm.power`, `vm.request_create`, `vm.request_update`, `vm.network`, `vm.delete`, `vm.share`.
-- Stockage : `storage.view`, `storage.request_create`, `storage.request_update`, `storage.delete`, `storage.share`.
 - Projet : `project.invite`.
 
 Profils prédéfinis :
 
-- `Lecteur` : `vm.view`, `storage.view`.
+- `Lecteur` : `vm.view`.
 - `Opérateur` : droits de Lecteur + `vm.console`, `vm.power`.
-- `Gestionnaire` : droits d'Opérateur + `vm.request_update`, `vm.network`, `storage.request_update`.
+- `Gestionnaire` : droits d'Opérateur + `vm.request_update`, `vm.network`.
 
-Les droits `vm.request_create`, `storage.request_create`, `vm.delete`, `storage.delete`, `vm.share`, `storage.share`, `project.invite` ne sont pas inclus dans ces profils prédéfinis et s'ajoutent individuellement.
+Les droits `vm.request_create`, `vm.delete`, `vm.share`, `project.invite` ne sont pas inclus dans ces profils prédéfinis et s'ajoutent individuellement.

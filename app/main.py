@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from app.api.v1.router import router as v1_router
 from app.application.ports.decision import Refuse, ServiceIndisponible
 from app.core.database import SessionLocal, get_db
-from app.core.dependencies import get_decision, get_iam
+from app.core.dependencies import get_iam
 from app.core.errors import (
     ErrorCode,
     error_responses,
@@ -39,7 +39,6 @@ from app.shared.models import (  # noqa: F401
 )
 from app.shared.models.projects import Membership, Project
 from app.shared.models.rights import RightModel
-from app.shared.policies.access import brancher_decision
 from app.shared.policies.rights import membership_rights
 from app.shared.seed.seeder import seed_default_packs, seed_default_profiles, seed_rights
 
@@ -95,6 +94,11 @@ class ReadinessOut(BaseModel):
     """Etat de disponibilite de l'application."""
 
     status: str = Field(examples=["ready"])
+    # CE QUI COMPTE LES QUOTAS, OU RIEN. Une sonde qui ne dit que « ready »
+    # laisserait une plateforme servir des mois sans qu aucun quota ne soit
+    # compte, et personne ne le verrait : rien ne casse, les chiffres mentent.
+    # Ici, la supervision le lit.
+    decision: str
 
 
 @app.get(
@@ -111,12 +115,17 @@ def ready(db: Session = Depends(get_db)) -> ReadinessOut:
     A ce stade, la base de donnees est la seule dependance reelle. Les ports
     hyperviseur, reseau, IAM et notifications sont encore des mocks : les sonder
     n'apporterait aucune information d'exploitation.
+
+    Le champ `decision` rend le reglage du service de decision — « off », « fake »
+    ou « gandal ». Il est la pour qu une supervision puisse ALERTER sur « off » :
+    un backend qui ne compte aucun quota ne doit pas pouvoir servir des mois sans
+    que quiconque s en apercoive.
     """
     try:
         db.execute(text("SELECT 1"))
     except SQLAlchemyError:
         raise upstream_unavailable("base de donnees") from None
-    return ReadinessOut(status="ready")
+    return ReadinessOut(status="ready", decision=get_settings().decision_backend)
 
 
 app.include_router(v1_router)
@@ -124,8 +133,6 @@ app.include_router(v1_router)
 
 # LE SERVICE DE DECISION EST BRANCHE AU DEMARRAGE, une fois. `authorize` le
 # retrouve par la — voir le commentaire de `access.py` sur ce compromis.
-brancher_decision(get_decision)
-
 # ON LE DIT FORT AU DEMARRAGE. Un backend qui ne compte aucun quota doit
 # l annoncer, pas le taire : « off » est un etat de transition, pas un reglage.
 _reglage = get_settings().decision_backend

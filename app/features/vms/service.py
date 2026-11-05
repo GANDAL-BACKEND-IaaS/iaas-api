@@ -7,6 +7,7 @@ Les actions directes appellent les ports et ne sont jamais appliquees a moitie.
 from sqlalchemy import delete, or_, select
 from sqlalchemy.orm import Session
 
+from app.application.ports.decision import DecisionPort
 from app.application.ports.hypervisor import HypervisorPort, HypervisorUnavailable, VmRef
 from app.application.ports.iam import IamPort, Identity
 from app.application.ports.network import NetworkPort, NetworkUnavailable
@@ -75,6 +76,10 @@ async def request_create_vm(
     identity: Identity,
     project_id: str,
     body: VMCreateRequestIn,
+    *,
+    # INJECTE, par mot-cle et avec un defaut : les appels positionnels
+    # existants continuent de marcher a l identique.
+    decision: DecisionPort | None = None,
 ) -> RequestOut:
     """F1 : depose une demande de creation. La VM n'existe qu'apres acceptation."""
     row = await submit_request(
@@ -85,7 +90,7 @@ async def request_create_vm(
         kind=RequestKind.VM_CREATE,
         payload=body.model_dump(),
         target_resource_id=None,
-    )
+     decision=decision)
     return RequestOut.model_validate(row)
 
 
@@ -96,6 +101,10 @@ async def request_update_vm(
     project_id: str,
     vm_id: str,
     body: VMUpdateRequestIn,
+    *,
+    # INJECTE, par mot-cle et avec un defaut : les appels positionnels
+    # existants continuent de marcher a l identique.
+    decision: DecisionPort | None = None,
 ) -> RequestOut:
     """F2 : depose une demande de modification de la configuration complete."""
     row = await submit_request(
@@ -106,7 +115,7 @@ async def request_update_vm(
         kind=RequestKind.VM_UPDATE,
         payload=body.model_dump(),
         target_resource_id=vm_id,
-    )
+     decision=decision)
     return RequestOut.model_validate(row)
 
 
@@ -121,10 +130,15 @@ async def list_vms(
     shared: bool | None = None,
     ip_address: str | None = None,
     name: str | None = None,
+    # INJECTE, par mot-cle et avec un defaut : les appels positionnels
+    # existants — leurs tests compris — continuent de marcher a
+    # l identique, et « None » garde le comportement d avant.
+    decision: DecisionPort | None = None,
 ) -> Page[VMOut]:
     """F3 : liste les VMs du projet, y compris celles qui y sont partagees."""
     _project(db, project_id)
     await authorize(
+        decision=decision,
         iam=iam,
         db=db,
         user_id=identity.user_id,
@@ -160,12 +174,18 @@ async def get_vm(
     identity: Identity,
     project_id: str,
     vm_id: str,
+    *,
+    # INJECTE, par mot-cle et avec un defaut : les appels positionnels
+    # existants — leurs tests compris — continuent de marcher a
+    # l identique, et « None » garde le comportement d avant.
+    decision: DecisionPort | None = None,
 ) -> VMOut:
     """F3 : consulte une VM visible dans le projet."""
     _project(db, project_id)
     vm = _load(db, vm_id)
     _visible_or_404(db, vm, project_id)
     await authorize(
+        decision=decision,
         iam=iam,
         db=db,
         user_id=identity.user_id,
@@ -184,12 +204,18 @@ async def power_vm(
     project_id: str,
     vm_id: str,
     action: PowerAction,
+    *,
+    # INJECTE, par mot-cle et avec un defaut : les appels positionnels
+    # existants — leurs tests compris — continuent de marcher a
+    # l identique, et « None » garde le comportement d avant.
+    decision: DecisionPort | None = None,
 ) -> PowerOut:
     """F4 : demarre, arrete ou redemarre une VM, sans demande."""
     _project(db, project_id)
     vm = _load(db, vm_id)
     _visible_or_404(db, vm, project_id)
     await authorize(
+        decision=decision,
         iam=iam,
         db=db,
         user_id=identity.user_id,
@@ -226,12 +252,18 @@ async def console_vm(
     identity: Identity,
     project_id: str,
     vm_id: str,
+    *,
+    # INJECTE, par mot-cle et avec un defaut : les appels positionnels
+    # existants — leurs tests compris — continuent de marcher a
+    # l identique, et « None » garde le comportement d avant.
+    decision: DecisionPort | None = None,
 ) -> ConsoleOut:
     """F5 : verifie le droit et le partage actif, puis fournit l'acces console."""
     _project(db, project_id)
     vm = _load(db, vm_id)
     _visible_or_404(db, vm, project_id)
     await authorize(
+        decision=decision,
         iam=iam,
         db=db,
         user_id=identity.user_id,
@@ -296,12 +328,18 @@ async def delete_vm(
     project_id: str,
     vm_id: str,
     confirmation_text: str | None,
+    *,
+    # INJECTE, par mot-cle et avec un defaut : les appels positionnels
+    # existants — leurs tests compris — continuent de marcher a
+    # l identique, et « None » garde le comportement d avant.
+    decision: DecisionPort | None = None,
 ) -> DeletionPreviewOut | DeletionOut:
     """F6 : protocole de suppression en deux temps, avec effets orchestres."""
     _project(db, project_id)
     vm = _load(db, vm_id)
     _visible_or_404(db, vm, project_id)
     await authorize(
+        decision=decision,
         iam=iam,
         db=db,
         user_id=identity.user_id,

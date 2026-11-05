@@ -7,11 +7,12 @@ F16 : l'administrateur accepte ou refuse, sans modifier la demande.
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
+from app.application.ports.decision import DecisionPort
 from app.application.ports.hypervisor import HypervisorPort
 from app.application.ports.iam import IamPort, Identity
 from app.application.ports.notifications import NotificationsPort
 from app.core.database import get_db
-from app.core.dependencies import get_hypervisor, get_iam, get_notifications
+from app.core.dependencies import get_decision, get_hypervisor, get_iam, get_notifications
 from app.core.errors import ErrorCode, error_responses
 from app.core.pagination import Page, PageParams, get_page_params
 from app.features.auth.dependencies import get_current_identity, require_admin
@@ -54,6 +55,7 @@ async def list_requests(
     identity: Identity = Depends(get_current_identity),
     iam: IamPort = Depends(get_iam),
     db: Session = Depends(get_db),
+    decision: DecisionPort | None = Depends(get_decision),
     params: PageParams = Depends(get_page_params),
     request_status: RequestStatus | None = Query(default=None, alias="status"),
     kind: RequestKind | None = Query(default=None),
@@ -87,6 +89,7 @@ async def get_request(
     identity: Identity = Depends(get_current_identity),
     iam: IamPort = Depends(get_iam),
     db: Session = Depends(get_db),
+    decision: DecisionPort | None = Depends(get_decision),
 ) -> RequestOut:
     """Retourne une demande accessible a l'appelant."""
     row = await service.get_request(
@@ -107,6 +110,7 @@ def cancel_request(
     request_id: str,
     identity: Identity = Depends(get_current_identity),
     db: Session = Depends(get_db),
+    decision: DecisionPort | None = Depends(get_decision),
 ) -> RequestOut:
     """Annule une demande en attente (F15, R5)."""
     row = service.cancel_request(db, author_id=identity.user_id, request_id=request_id)
@@ -127,6 +131,7 @@ async def accept_request(
     body: RequestDecisionIn,
     identity: Identity = Depends(require_admin),
     db: Session = Depends(get_db),
+    decision: DecisionPort | None = Depends(get_decision),
     hypervisor: HypervisorPort = Depends(get_hypervisor),
     notifications: NotificationsPort = Depends(get_notifications),
 ) -> RequestOut:
@@ -139,7 +144,7 @@ async def accept_request(
         note=body.note,
         hypervisor=hypervisor,
         notifications=notifications,
-    )
+     decision=decision)
     return RequestOut.model_validate(row)
 
 
@@ -157,6 +162,7 @@ async def refuse_request(
     body: RequestDecisionIn,
     identity: Identity = Depends(require_admin),
     db: Session = Depends(get_db),
+    decision: DecisionPort | None = Depends(get_decision),
     notifications: NotificationsPort = Depends(get_notifications),
 ) -> RequestOut:
     """Refuse une demande en attente sans en changer le contenu (F16, R3)."""

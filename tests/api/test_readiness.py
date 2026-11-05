@@ -25,7 +25,17 @@ def test_ready_reports_database_connectivity(client):
     """L'application est prete quand la base repond."""
     response = client.get("/ready")
     assert response.status_code == 200
-    assert response.json() == {"status": "ready"}
+    assert response.json()["status"] == "ready"
+
+
+def test_ready_dit_si_les_quotas_sont_comptes(client):
+    """Le champ `decision` existe POUR QU UNE SUPERVISION ALERTE SUR « off ».
+
+    Sans lui, une plateforme pourrait servir des mois sans qu aucun quota ne soit
+    compte, et personne ne le verrait : rien ne casse, les chiffres mentent.
+    """
+    corps = client.get("/ready").json()
+    assert corps["decision"] in ("off", "fake", "gandal")
 
 
 def test_ready_returns_503_when_database_is_unavailable(client):

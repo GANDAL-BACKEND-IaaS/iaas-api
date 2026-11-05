@@ -7,6 +7,7 @@ Lecture : proprietaire ou `vm.view`. Ecriture : proprietaire ou `vm.network`.
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
+from app.application.ports.decision import DecisionPort
 from app.application.ports.hypervisor import VmRef
 from app.application.ports.iam import IamPort, Identity
 from app.application.ports.network import NetworkPort, NetworkRef, NetworkUnavailable
@@ -71,10 +72,16 @@ async def create_network(
     identity: Identity,
     project_id: str,
     name: str,
+    *,
+    # INJECTE, par mot-cle et avec un defaut : les appels positionnels
+    # existants — leurs tests compris — continuent de marcher a
+    # l identique, et « None » garde le comportement d avant.
+    decision: DecisionPort | None = None,
 ) -> NetworkOut:
     """F7 : cree un reseau dans le projet."""
     _project(db, project_id)
     await authorize(
+        decision=decision,
         iam=iam, db=db, user_id=identity.user_id, project_id=project_id, required_right="vm.network"
     )
     if _same_name(db, project_id, name):
@@ -130,11 +137,17 @@ async def update_network(
     project_id: str,
     network_id: str,
     name: str,
+    *,
+    # INJECTE, par mot-cle et avec un defaut : les appels positionnels
+    # existants — leurs tests compris — continuent de marcher a
+    # l identique, et « None » garde le comportement d avant.
+    decision: DecisionPort | None = None,
 ) -> NetworkOut:
     """F7 : renomme un reseau. L'appel externe precede la modification locale."""
     _project(db, project_id)
     row = _network(db, project_id, network_id)
     await authorize(
+        decision=decision,
         iam=iam, db=db, user_id=identity.user_id, project_id=project_id, required_right="vm.network"
     )
     if _same_name(db, project_id, name, exclude_id=row.id):
@@ -166,11 +179,17 @@ async def attach_vm(
     project_id: str,
     network_id: str,
     vm_id: str,
+    *,
+    # INJECTE, par mot-cle et avec un defaut : les appels positionnels
+    # existants — leurs tests compris — continuent de marcher a
+    # l identique, et « None » garde le comportement d avant.
+    decision: DecisionPort | None = None,
 ) -> NetworkOut:
     """F7 : rattache une VM visible dans le projet. Ajout idempotent."""
     _project(db, project_id)
     row = _network(db, project_id, network_id)
     await authorize(
+        decision=decision,
         iam=iam, db=db, user_id=identity.user_id, project_id=project_id, required_right="vm.network"
     )
     vm = db.get(Vm, vm_id)
@@ -213,11 +232,17 @@ async def detach_vm(
     project_id: str,
     network_id: str,
     vm_id: str,
+    *,
+    # INJECTE, par mot-cle et avec un defaut : les appels positionnels
+    # existants — leurs tests compris — continuent de marcher a
+    # l identique, et « None » garde le comportement d avant.
+    decision: DecisionPort | None = None,
 ) -> NetworkOut:
     """F7 : retire une VM du reseau. Retrait idempotent."""
     _project(db, project_id)
     row = _network(db, project_id, network_id)
     await authorize(
+        decision=decision,
         iam=iam, db=db, user_id=identity.user_id, project_id=project_id, required_right="vm.network"
     )
     link = db.get(NetworkVm, (network_id, vm_id))
@@ -250,11 +275,17 @@ async def delete_network(
     project_id: str,
     network_id: str,
     confirmation_text: str | None,
+    *,
+    # INJECTE, par mot-cle et avec un defaut : les appels positionnels
+    # existants — leurs tests compris — continuent de marcher a
+    # l identique, et « None » garde le comportement d avant.
+    decision: DecisionPort | None = None,
 ) -> DeletionPreviewOut | DeletionOut:
     """F7 : protocole de suppression en deux temps. Aucun effet local si le port echoue."""
     _project(db, project_id)
     row = _network(db, project_id, network_id)
     await authorize(
+        decision=decision,
         iam=iam, db=db, user_id=identity.user_id, project_id=project_id, required_right="vm.network"
     )
     text = expected_text(row.name)

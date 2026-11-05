@@ -16,34 +16,42 @@ from __future__ import annotations
 import pytest
 
 from app.application.ports.decision import Refuse
+from app.core.dependencies import get_decision
 from app.infrastructure.iam.fake_decision import FakeDecisionClient
-from app.shared.policies import access
+from app.main import app
 
 PLAN = {"vm_count": 5, "vcpu": 16, "ram_gb": 32, "disk_gb": 500, "gpu_mem_mb": 8192}
 
 
 @pytest.fixture
 def decision():
-    """Branche un faux service pour la duree du test, et le debranche apres.
+    """Un faux service, INJECTE par la dependance de FastAPI.
 
-    Le debranchement n est pas du menage : sans lui, les tests suivants
-    heriteraient d un service de decision et ne mesureraient plus ce qu ils
-    croient mesurer.
+    `app.dependency_overrides` est le mecanisme de leur propre `conftest` pour
+    `get_db`, `get_iam` et les autres : on s en sert ici aussi, plutot que
+    d inventer un second chemin.
     """
     faux = FakeDecisionClient(plan_par_defaut=PLAN)
-    access.brancher_decision(lambda: faux)
+    app.dependency_overrides[get_decision] = lambda: faux
     yield faux
-    access.brancher_decision(None)
+    app.dependency_overrides.pop(get_decision, None)
 
 
-def test_le_resolveur_rend_None_quand_rien_n_est_branche():
-    """« off » doit etre inerte, pas permissif par accident : il n a simplement
-    pas d interlocuteur."""
-    access.brancher_decision(None)
-    assert access.resolveur() is None
+def test_le_defaut_du_reglage_est_off():
+    """« off » doit etre INERTE, pas permissif par accident. La fabrique rend
+    alors None, et `authorize` le voit : il n a simplement pas d interlocuteur.
+
+    On verifie le DEFAUT, parce que c est lui qui compte : un deploiement qui
+    oublie le reglage ne doit pas se retrouver avec des quotas en memoire
+    (« fake ») ni avec un service injoignable (« gandal »)."""
+    from app.core.settings import Settings
+
+    assert Settings().decision_backend == "off"
 
 
 def test_la_table_relie_chaque_droit_a_une_action_iam():
+    from app.shared.policies import access
+
     t = access._ACTION_POUR_DROIT
     assert t["vm.request_create"] == "vm:create"
     assert t["vm.request_update"] == "vm:update"

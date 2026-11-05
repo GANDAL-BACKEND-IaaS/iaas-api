@@ -8,10 +8,11 @@ Aucun acces administrateur global : seul le membership donne acces.
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
+from app.application.ports.decision import DecisionPort
 from app.application.ports.iam import IamPort, Identity
 from app.application.ports.network import NetworkPort
 from app.core.database import get_db
-from app.core.dependencies import get_iam, get_network
+from app.core.dependencies import get_decision, get_iam, get_network
 from app.core.errors import ErrorCode, error_responses
 from app.core.pagination import Page, PageParams, get_page_params
 from app.features.auth.dependencies import get_current_identity
@@ -52,6 +53,7 @@ async def list_project_shares(
     identity: Identity = Depends(get_current_identity),
     iam: IamPort = Depends(get_iam),
     db: Session = Depends(get_db),
+    decision: DecisionPort | None = Depends(get_decision),
     params: PageParams = Depends(get_page_params),
     resource_type: ResourceType | None = Query(default=None),
     share_status: ShareStatus = Query(default=ShareStatus.ACTIVE, alias="status"),
@@ -84,6 +86,7 @@ async def share_vm(
     identity: Identity = Depends(get_current_identity),
     iam: IamPort = Depends(get_iam),
     db: Session = Depends(get_db),
+    decision: DecisionPort | None = Depends(get_decision),
 ) -> ShareOut:
     """Cree un partage actif depuis le projet d'origine de la VM."""
     row = await service.create_share(
@@ -94,7 +97,7 @@ async def share_vm(
         resource_type=ResourceType.VM,
         resource_id=vm_id,
         dest_project_id=body.dest_project_id,
-    )
+     decision=decision)
     return ShareOut.model_validate(row)
 
 
@@ -111,6 +114,7 @@ async def list_vm_shares(
     identity: Identity = Depends(get_current_identity),
     iam: IamPort = Depends(get_iam),
     db: Session = Depends(get_db),
+    decision: DecisionPort | None = Depends(get_decision),
     params: PageParams = Depends(get_page_params),
     share_status: ShareStatus | None = Query(default=None, alias="status"),
     dest_project_id: str | None = Query(default=None),
@@ -126,7 +130,7 @@ async def list_vm_shares(
         params=params,
         status=share_status,
         dest_project_id=dest_project_id,
-    )
+     decision=decision)
     return Page.build([ShareOut.model_validate(row) for row in rows], total, params)
 
 
@@ -143,6 +147,7 @@ async def revoke_share(
     iam: IamPort = Depends(get_iam),
     network: NetworkPort = Depends(get_network),
     db: Session = Depends(get_db),
+    decision: DecisionPort | None = Depends(get_decision),
 ) -> ShareRevokeOut:
     """Revoque un partage actif. Une VM quitte les reseaux du projet destinataire."""
     row = await service.revoke_share(
@@ -165,6 +170,7 @@ async def list_shares(
     identity: Identity = Depends(get_current_identity),
     iam: IamPort = Depends(get_iam),
     db: Session = Depends(get_db),
+    decision: DecisionPort | None = Depends(get_decision),
     params: PageParams = Depends(get_page_params),
 ) -> Page[ShareOut]:
     """Partages des projets dont l'appelant est membre. Aucun bypass administrateur."""
@@ -186,6 +192,7 @@ async def get_share(
     identity: Identity = Depends(get_current_identity),
     iam: IamPort = Depends(get_iam),
     db: Session = Depends(get_db),
+    decision: DecisionPort | None = Depends(get_decision),
 ) -> ShareOut:
     """Retourne un partage si l'appelant est membre d'un des projets concernes."""
     row = await service.get_share(db, iam, user_id=identity.user_id, share_id=share_id)

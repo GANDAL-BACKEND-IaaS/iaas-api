@@ -56,27 +56,6 @@ _ACTION_POUR_DROIT: dict[str, str] = {
 }
 
 
-def _resolveur_par_defaut():
-    return None
-
-
-# COMMENT LE PORT ARRIVE ICI, et pourquoi ce n est pas de l injection.
-# `main.py` appelle `brancher_decision(get_decision)` au demarrage ; les tests le
-# remplacent par ce qu ils veulent. C est un localisateur de service, donc moins
-# propre qu un parametre — et je le dis plutot que de le cacher. Le raisonnement :
-# faire passer le port par les signatures demanderait de toucher quatre services
-# et quatre routeurs dans un depot ou l equipe ecrit en ce moment. Le faire
-# proprement par injection est le bon etat final, et il appartient a qui tient ce
-# code.
-_resolveur = _resolveur_par_defaut
-
-
-def brancher_decision(resolveur) -> None:
-    """Branche (ou debranche, avec `None`) le service de decision."""
-    global _resolveur
-    _resolveur = resolveur or _resolveur_par_defaut
-
-
 async def authorize(
     *,
     iam: IamPort,
@@ -118,8 +97,6 @@ async def authorize(
     rights = await iam.get_rights(user_id, project_id)
     if required_right not in rights:
         raise AppError(ErrorCode.FORBIDDEN, f"Droit requis manquant : {required_right}.")
-    if decision is None:
-        decision = _resolveur()
     if action is None:
         action = _ACTION_POUR_DROIT.get(required_right)
     if decision is not None and action is not None:
@@ -133,10 +110,3 @@ async def authorize(
                          "id": str(resource.resource_id), "projet": project_id}
         await decision.autoriser(sujet=user_id, action=action,
                                  ressource=ressource, contexte=contexte)
-
-
-def resolveur():
-    """Le service de decision branche, ou None. Expose pour les appelants qui en
-    ont besoin HORS de `authorize` — l acceptation d une demande, qui retient du
-    quota et ne fait pas que decider."""
-    return _resolveur()

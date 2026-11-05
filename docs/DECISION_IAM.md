@@ -133,7 +133,17 @@ qu'on ne peut pas réparer sur place.
 En mode `fake`, le backend démarre **sans** elle : l'import est fait dans la
 fabrique, pas en tête de module.
 
-## 7. Le stockage objet : Drive, S3, Supabase
+## 7. Le stockage objet : prêt dans IAM, sans routes ici
+
+**Le backend n'a plus de routes `storages` ni `dns`** — le périmètre a été retiré
+(`978aeab`). Il n'y a donc rien à câbler, et la section ci-dessous décrit ce qui
+**attend** du côté d'IAM, prêt à l'emploi le jour où ces routes reviennent.
+
+Les six actions `storage:*` et les quatre ressources de quota existent dans IAM.
+La greffe sera la même, au même endroit : `authorize` déduit l'action du droit,
+`accept_request` retient le quota.
+
+### Ce qui est prêt côté IAM
 
 **Un projet peut l'utiliser ou pas, et il n'y a rien de plus à brancher.** La
 limite par défaut d'un projet est **zéro** : un projet sans quota de stockage est
@@ -209,7 +219,44 @@ une levée des quotas, et il **n'a aucun effet** en mode `gandal`.
 Le faux refuse pour de vrai au-delà de ce plan : le chemin de refus s'exécute en
 développement, au lieu d'être découvert au premier refus réel.
 
-## 10. Les tests
+## 10. Comment le port arrive : par injection
+
+En paramètre, **par mot-clé et avec un défaut** :
+
+```python
+async def power_vm(db, iam, hypervisor, identity, project_id, vm_id, action,
+                   *, decision: DecisionPort | None = None) -> VMOut:
+```
+
+C'est ce détail qui rend la greffe possible sans toucher un seul appelant
+existant : les services sont appelés **positionnellement** partout, y compris
+dans les tests, et un paramètre nommé avec défaut leur est invisible. `None`
+garde exactement le comportement d'avant.
+
+Les routeurs l'obtiennent de FastAPI :
+
+```python
+decision: DecisionPort | None = Depends(get_decision)
+```
+
+Une première version passait par un **localisateur de service**
+(`brancher_decision`). Elle a été retirée : le compromis n'était pas nécessaire,
+il reposait sur l'idée fausse qu'un paramètre de plus obligeait à réécrire les
+appels.
+
+## 11. `/ready` dit si les quotas sont comptés
+
+```json
+{ "status": "ready", "decision": "off" }
+```
+
+Le champ `decision` est là **pour qu'une supervision alerte sur `off`**. Sans
+lui, une plateforme pourrait servir des mois sans qu'aucun quota ne soit compté,
+et personne ne le verrait : rien ne casse, les chiffres mentent simplement.
+
+À surveiller : `decision != "gandal"` en production.
+
+## 12. Les tests
 
 ```bash
 pytest tests/unit/test_decision.py                 # 13 : la sequence et ses refus

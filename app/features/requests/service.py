@@ -12,6 +12,7 @@ from pydantic import ValidationError
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from app.application.ports.decision import DecisionPort
 from app.application.ports.hypervisor import HypervisorPort, HypervisorUnavailable, VmRef, VmSpec
 from app.application.ports.iam import GlobalRole, IamPort
 from app.application.ports.notifications import Notification, NotificationsPort
@@ -28,7 +29,6 @@ from app.shared.models.projects import Project
 from app.shared.models.requests import ResourceRequest
 from app.shared.models.vms import Vm
 from app.shared.policies.access import ResourceView, authorize
-from app.shared.policies.access import resolveur as _resolveur_decision
 from app.shared.time import utcnow
 
 logger = logging.getLogger(__name__)
@@ -155,11 +155,16 @@ async def submit_request(
     kind: RequestKind,
     payload: dict,
     target_resource_id: str | None,
+    # INJECTE, par mot-cle et avec un defaut : les appels positionnels
+    # existants — leurs tests compris — continuent de marcher a
+    # l identique, et « None » garde le comportement d avant.
+    decision: DecisionPort | None = None,
 ) -> ResourceRequest:
     """Enregistre une demande en attente apres controle des droits (R1, R2, R13)."""
     _require_project(db, project_id)
     normalized, target_type, view = _prepare(db, kind, payload, target_resource_id)
     await authorize(
+        decision=decision,
         iam=iam,
         db=db,
         user_id=author_id,
@@ -276,6 +281,10 @@ async def accept_request(
     note: str | None,
     hypervisor: HypervisorPort,
     notifications: NotificationsPort,
+    # INJECTE, par mot-cle et avec un defaut : les appels positionnels
+    # existants — leurs tests compris — continuent de marcher a
+    # l identique, et « None » garde le comportement d avant.
+    decision: DecisionPort | None = None,
 ) -> ResourceRequest:
     """Accepte une demande sans la modifier, puis appelle le handler du kind (R3, F16)."""
     _require_admin(actor_role)
@@ -301,7 +310,6 @@ async def accept_request(
     # maintenant, son role a pu expirer, son projet etre archive, une politique
     # changer. Accepter sur la foi d une decision de trois jours applique un
     # droit perime.
-    decision = _resolveur_decision()
     if decision is not None and row.kind == RequestKind.VM_CREATE.value:
         await decision.autoriser(
             sujet=row.author_id, action="vm:create",

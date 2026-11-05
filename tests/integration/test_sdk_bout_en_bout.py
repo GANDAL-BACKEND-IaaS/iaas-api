@@ -20,18 +20,19 @@ from __future__ import annotations
 
 import pytest
 
+from app.core.dependencies import get_decision
 from app.infrastructure.iam.fake_decision import FakeDecisionClient
-from app.shared.policies import access
+from app.main import app
 from tests.support import login_header, own_project
 
 gandal_sdk = pytest.importorskip("gandal_sdk", reason="pip install -e <GANDAL-SDK>")
 
-from gandal_sdk._http import HttpTransport                      # noqa: E402
-from gandal_sdk.errors import GandalApiError                    # noqa: E402
-from gandal_sdk.orchestration.api import OrchestrationApi       # noqa: E402
-from gandal_sdk.orchestration.models import (                   # noqa: E402
-    VMCreateRequestIn,
+from gandal_sdk._http import HttpTransport  # noqa: E402
+from gandal_sdk.errors import GandalApiError  # noqa: E402
+from gandal_sdk.orchestration.api import OrchestrationApi  # noqa: E402
+from gandal_sdk.orchestration.models import (  # noqa: E402
     VmConfigurationIn,
+    VMCreateRequestIn,
 )
 
 PLAN = {"vm_count": 5, "vcpu": 16, "ram_gb": 32, "disk_gb": 500, "gpu_mem_mb": 8192}
@@ -40,9 +41,9 @@ PLAN = {"vm_count": 5, "vcpu": 16, "ram_gb": 32, "disk_gb": 500, "gpu_mem_mb": 8
 @pytest.fixture
 def decision():
     faux = FakeDecisionClient(plan_par_defaut=PLAN)
-    access.brancher_decision(lambda: faux)
+    app.dependency_overrides[get_decision] = lambda: faux
     yield faux
-    access.brancher_decision(None)
+    app.dependency_overrides.pop(get_decision, None)
 
 
 def sdk(client, entetes) -> OrchestrationApi:
@@ -123,7 +124,7 @@ async def test_un_refus_de_decision_porte_son_motif_jusqu_au_SDK(client, iam, db
 @pytest.mark.anyio
 async def test_sans_service_de_decision_le_sdk_fonctionne_comme_avant(client, iam, db):
     """« off » doit etre INERTE : la greffe ne change rien quand elle est eteinte."""
-    access.brancher_decision(None)
+    app.dependency_overrides.pop(get_decision, None)
     await own_project(db, iam, "p1")
     h = await login_header(iam)
     api = sdk(client, h)

@@ -8,6 +8,7 @@ Un administrateur global ne voit pas les partages des utilisateurs : seul le mem
 from sqlalchemy import and_, delete, or_, select
 from sqlalchemy.orm import Session
 
+from app.application.ports.decision import DecisionPort
 from app.application.ports.hypervisor import VmRef
 from app.application.ports.iam import IamPort
 from app.application.ports.network import NetworkPort, NetworkUnavailable
@@ -75,6 +76,10 @@ async def create_share(
     resource_type: ResourceType,
     resource_id: str,
     dest_project_id: str,
+    # INJECTE, par mot-cle et avec un defaut : les appels positionnels
+    # existants — leurs tests compris — continuent de marcher a
+    # l identique, et « None » garde le comportement d avant.
+    decision: DecisionPort | None = None,
 ) -> ResourceShare:
     """Rend la ressource visible dans le projet destinataire. Aucun droit n'est transmis (R16)."""
     _project(db, project_id)
@@ -98,6 +103,7 @@ async def create_share(
             "Le partage n'est possible qu'entre projets d'un meme proprietaire.",
         )
     await authorize(
+        decision=decision,
         iam=iam,
         db=db,
         user_id=user_id,
@@ -191,6 +197,10 @@ async def list_for_resource(
     params: PageParams,
     status: ShareStatus | None = None,
     dest_project_id: str | None = None,
+    # INJECTE, par mot-cle et avec un defaut : les appels positionnels
+    # existants — leurs tests compris — continuent de marcher a
+    # l identique, et « None » garde le comportement d avant.
+    decision: DecisionPort | None = None,
 ) -> tuple[list[ResourceShare], int]:
     """Partages emis pour une ressource de ce projet."""
     _project(db, project_id)
@@ -198,6 +208,7 @@ async def list_for_resource(
     if resource.origin_project_id != project_id:
         raise AppError(ErrorCode.NOT_FOUND, "Ressource introuvable dans ce projet.")
     await authorize(
+        decision=decision,
         iam=iam,
         db=db,
         user_id=user_id,

@@ -28,7 +28,9 @@ gandal_garde = pytest.importorskip(
     "gandal_garde",
     reason="pip install -e <Gandal>/iam/garde-serveur")
 
-from app.infrastructure.iam.gandal_decision import GandalDecisionClient
+from app.infrastructure.iam.gandal_decision import (  # noqa: E402
+    GandalDecisionClient,
+)
 
 ID_CLE, SECRET = "AKIAESSAI", "secret-d-essai-0123456789"
 

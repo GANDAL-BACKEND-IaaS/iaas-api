@@ -46,6 +46,7 @@ def test_admin_operations_are_grouped_under_admin_tags():
     admin_operations = {
         "create_admin",
         "list_users",
+        "get_user_overview",
         "create_profile",
         "update_profile",
         "delete_profile",

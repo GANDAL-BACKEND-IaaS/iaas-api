@@ -420,6 +420,13 @@ Les ressources de projet (membres, invitations, VM et stockage) sont listées da
 - Réponse `200 OK` : page standard contenant les identités fournies par l'IAM (`user_id`, `email`, `first_name`, `last_name`, `role`), administrateurs inclus.
 - Erreurs : `401` non authentifié ; `403` rôle non administrateur ; `422` paramètres invalides.
 
+### `GET /api/v1/admin/users/{user_id}/overview` — Consulter les données opérationnelles d'un utilisateur
+
+- Accès : administrateur connecté.
+- Réponse `200 OK` : projets possédés ou rejoints, droits, VMs et réseaux par projet, invitations envoyées ou reçues, demandes déposées et partages créés ou liés aux projets de l'utilisateur.
+- L'identité IAM n'est pas répétée ; utiliser `GET /api/v1/admin/users` pour la consulter.
+- Erreurs : `401` non authentifié ; `403` rôle non administrateur ; `404` compte absent de l'IAM ; `503` IAM indisponible.
+
 ### `PATCH /api/v1/auth/me` — Modifier son compte
 
 - Accès : authentifié.

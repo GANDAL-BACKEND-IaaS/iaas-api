@@ -29,6 +29,8 @@ from app.core.errors import ErrorCode, error_responses
 from app.core.pagination import Page, PageParams, get_page_params
 from app.features.auth import service
 from app.features.auth.dependencies import get_current_identity, require_admin
+from app.features.auth.overview import get_user_overview
+from app.features.auth.overview_schemas import UserOverviewOut
 from app.features.auth.schemas import (
     IdentityOut,
     LoginIn,
@@ -64,6 +66,32 @@ async def list_users(
         limit=params.page_size,
     )
     return Page.build([IdentityOut.of(identity) for identity in identities], total, params)
+
+
+@admin_router.get(
+    "/users/{user_id}/overview",
+    response_model=UserOverviewOut,
+    operation_id="get_user_overview",
+    summary="Consulter les donnees operationnelles d'un utilisateur",
+    description=(
+        "Retourne ses projets, ressources et relations operationnelles sans repeter "
+        "son identite, deja disponible dans l'annuaire."
+    ),
+    responses=error_responses(
+        ErrorCode.UNAUTHORIZED,
+        ErrorCode.FORBIDDEN,
+        ErrorCode.NOT_FOUND,
+        ErrorCode.UPSTREAM_UNAVAILABLE,
+    ),
+)
+async def get_user_overview_endpoint(
+    user_id: str,
+    iam: IamPort = Depends(get_iam),
+    db: Session = Depends(get_db),
+    _: Identity = Depends(require_admin),
+) -> UserOverviewOut:
+    """Retourne la vue operationnelle d'un compte existant dans l'IAM."""
+    return await get_user_overview(db, iam, user_id)
 
 
 @router.post(

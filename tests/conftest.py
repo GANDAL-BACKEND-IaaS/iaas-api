@@ -1,3 +1,18 @@
+# LE DEFAUT DU CODE EST « gandal » : UN DEPLOIEMENT QUI OUBLIE LA VARIABLE
+# DOIT EXIGER IAM, PAS S EN PASSER. C est la polarite correcte — une
+# autorisation qui tombe en panne OUVERTE est pire qu un service qui refuse de
+# demarrer, et « off » par defaut etait exactement ca.
+#
+# Ce sont donc LES TESTS qui disent explicitement qu ils ne veulent pas d IAM.
+# C est ici qu il faut l exception, pas en production : la suite doit tourner
+# sans cle, sans autorite et sans reseau.
+#
+# AVANT TOUT IMPORT DE « app » : les reglages sont lus au premier import, et
+# poser la variable apres n aurait aucun effet.
+import os
+
+os.environ.setdefault("DECISION_BACKEND", "off")
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine

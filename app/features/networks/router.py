@@ -3,10 +3,11 @@
 from fastapi import APIRouter, Body, Depends, Query, status
 from sqlalchemy.orm import Session
 
+from app.application.ports.decision import DecisionPort
 from app.application.ports.iam import IamPort, Identity
 from app.application.ports.network import NetworkPort
 from app.core.database import get_db
-from app.core.dependencies import get_iam, get_network
+from app.core.dependencies import get_decision, get_iam, get_network
 from app.core.errors import ErrorCode, error_responses
 from app.core.pagination import Page, PageParams, get_page_params
 from app.features.auth.dependencies import get_current_identity
@@ -46,9 +47,10 @@ async def create_network(
     iam: IamPort = Depends(get_iam),
     port: NetworkPort = Depends(get_network),
     db: Session = Depends(get_db),
+    decision: DecisionPort | None = Depends(get_decision),
 ) -> NetworkOut:
     """F7 : cree un reseau dans le projet."""
-    return await service.create_network(db, iam, port, identity, project_id, body.name)
+    return await service.create_network(db, iam, port, identity, project_id, body.name, decision=decision)
 
 
 @router.get(
@@ -63,6 +65,7 @@ async def list_networks(
     identity: Identity = Depends(get_current_identity),
     iam: IamPort = Depends(get_iam),
     db: Session = Depends(get_db),
+    decision: DecisionPort | None = Depends(get_decision),
     params: PageParams = Depends(get_page_params),
     name: str | None = Query(default=None, max_length=128),
 ) -> Page[NetworkOut]:
@@ -83,6 +86,7 @@ async def read_network(
     identity: Identity = Depends(get_current_identity),
     iam: IamPort = Depends(get_iam),
     db: Session = Depends(get_db),
+    decision: DecisionPort | None = Depends(get_decision),
 ) -> NetworkOut:
     """F7 : lit un reseau du projet."""
     return await service.get_network(db, iam, identity, project_id, network_id)
@@ -103,11 +107,12 @@ async def update_network(
     iam: IamPort = Depends(get_iam),
     port: NetworkPort = Depends(get_network),
     db: Session = Depends(get_db),
+    decision: DecisionPort | None = Depends(get_decision),
 ) -> NetworkOut:
     """F7 : renomme un reseau."""
     return await service.update_network(
         db, iam, port, identity, project_id, network_id, body.name
-    )
+    , decision=decision)
 
 
 @router.post(
@@ -125,11 +130,12 @@ async def attach_vm(
     iam: IamPort = Depends(get_iam),
     port: NetworkPort = Depends(get_network),
     db: Session = Depends(get_db),
+    decision: DecisionPort | None = Depends(get_decision),
 ) -> NetworkOut:
     """F7 : rattache une VM visible dans le projet, partagee ou non (R21)."""
     return await service.attach_vm(
         db, iam, port, identity, project_id, network_id, body.vm_id
-    )
+    , decision=decision)
 
 
 @router.delete(
@@ -147,11 +153,12 @@ async def detach_vm(
     iam: IamPort = Depends(get_iam),
     port: NetworkPort = Depends(get_network),
     db: Session = Depends(get_db),
+    decision: DecisionPort | None = Depends(get_decision),
 ) -> NetworkOut:
     """F7 : retire une VM du reseau (idempotent)."""
     return await service.detach_vm(
         db, iam, port, identity, project_id, network_id, vm_id
-    )
+    , decision=decision)
 
 
 @router.post(
@@ -169,9 +176,10 @@ async def delete_network(
     iam: IamPort = Depends(get_iam),
     port: NetworkPort = Depends(get_network),
     db: Session = Depends(get_db),
+    decision: DecisionPort | None = Depends(get_decision),
     body: DeletionIn = Body(default_factory=DeletionIn),
 ):
     """F7 : apercu puis suppression effective du reseau."""
     return await service.delete_network(
         db, iam, port, identity, project_id, network_id, body.confirmation_text
-    )
+    , decision=decision)

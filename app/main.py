@@ -5,23 +5,27 @@ on rehydrate le mock IAM depuis la base metier : les projets et les droits survi
 ainsi a un redemarrage du processus.
 """
 
+import logging
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.api.v1.router import router as v1_router
+from app.application.ports.decision import Refuse, ServiceIndisponible
 from app.core.database import SessionLocal, get_db
-from app.core.dependencies import get_iam
+from app.core.dependencies import get_decision, get_iam
 from app.core.errors import (
     ErrorCode,
     error_responses,
     register_exception_handlers,
     upstream_unavailable,
 )
+from app.core.settings import get_settings
 from app.shared.models import (  # noqa: F401
     audit,
     identities,
@@ -90,6 +94,11 @@ class ReadinessOut(BaseModel):
     """Etat de disponibilite de l'application."""
 
     status: str = Field(examples=["ready"])
+    # CE QUI COMPTE LES QUOTAS, OU RIEN. Une sonde qui ne dit que « ready »
+    # laisserait une plateforme servir des mois sans qu aucun quota ne soit
+    # compte, et personne ne le verrait : rien ne casse, les chiffres mentent.
+    # Ici, la supervision le lit.
+    decision: str
 
 
 @app.get(
@@ -106,12 +115,87 @@ def ready(db: Session = Depends(get_db)) -> ReadinessOut:
     A ce stade, la base de donnees est la seule dependance reelle. Les ports
     hyperviseur, reseau, IAM et notifications sont encore des mocks : les sonder
     n'apporterait aucune information d'exploitation.
+
+    Le champ `decision` rend le reglage du service de decision — « off », « fake »
+    ou « gandal ». Il est la pour qu une supervision puisse ALERTER sur « off » :
+    un backend qui ne compte aucun quota ne doit pas pouvoir servir des mois sans
+    que quiconque s en apercoive.
     """
     try:
         db.execute(text("SELECT 1"))
     except SQLAlchemyError:
         raise upstream_unavailable("base de donnees") from None
-    return ReadinessOut(status="ready")
+    # ─── « decision » DIT LA CAPACITE, PAS LE REGLAGE ───────────────────────
+    #
+    # ELLE DISAIT LE REGLAGE, ET ELLE MENTAIT. Le 6 novembre 2026, ce point
+    # d API a annonce « decision: gandal » sur une machine ou « gandal_garde »
+    # n etait meme pas installe : l adaptateur ne pouvait pas etre construit,
+    # et toute decision aurait leve ModuleNotFoundError au premier appel.
+    # Une supervision qui lit cette valeur aurait conclu que tout allait bien.
+    #
+    # On CONSTRUIT donc l adaptateur. C est bon marche — imports, lecture de la
+    # cle, verification de son mode — et ca attrape exactement ce qui est
+    # arrive. On ne fait PAS d appel reseau ici : « /ready » est interroge en
+    # boucle par les supervisions, et une decision par sonde chargerait IAM
+    # pour rien.
+    reglage = get_settings().decision_backend
+    if reglage == "off":
+        decision = "off"
+    else:
+        try:
+            decision = reglage if get_decision() is not None else "off"
+        except Exception as e:                                  # noqa: BLE001
+            # ON NE LEVE PAS 503 : la base repond, les routes servent, et
+            # « off » est un etat de service degrade qui se lit. Mais on le DIT,
+            # et on le journalise une fois par sonde — c est ce qui remonte
+            # dans une alerte.
+            logging.getLogger("app").error(
+                "DECISION_BACKEND=%s mais l adaptateur est inconstructible : "
+                "%s. Aucune decision IAM ne sera prise.", reglage, e)
+            decision = f"{reglage} (INDISPONIBLE)"
+    return ReadinessOut(status="ready", decision=decision)
 
 
 app.include_router(v1_router)
+
+
+# LE SERVICE DE DECISION EST BRANCHE AU DEMARRAGE, une fois. `authorize` le
+# retrouve par la — voir le commentaire de `access.py` sur ce compromis.
+# ON LE DIT FORT AU DEMARRAGE. Un backend qui ne compte aucun quota doit
+# l annoncer, pas le taire : « off » est une sortie de secours EXPLICITE, pas un
+# defaut — le defaut est « gandal » depuis le 5 novembre 2026, parce qu une
+# autorisation qui tombe en panne ouverte est pire qu un service qui refuse de
+# demarrer.
+_reglage = get_settings().decision_backend
+if _reglage == "off":
+    logging.getLogger("app").warning(
+        "DECISION_BACKEND=off : AUCUNE decision IAM n est demandee et AUCUN quota "
+        "n est compte. C est un choix EXPLICITE — le defaut est « gandal ». "
+        "Retirer la variable pour revenir au comportement sur.")
+elif _reglage == "fake":
+    logging.getLogger("app").warning(
+        "DECISION_BACKEND=fake : quotas en MEMOIRE, remis a zero a chaque "
+        "redemarrage. Developpement seulement.")
+
+
+@app.exception_handler(Refuse)
+async def _refus_de_decision(_: Request, exc: Refuse) -> JSONResponse:
+    """Traduit un refus du service de decision en RFC 9457 (`problem+json`).
+
+    Sans ce gestionnaire, un refus de quota sort en 500 et l'utilisateur lit
+    « erreur interne » la ou IAM avait ecrit « il vous reste 2 vCPU sur 4 ». Le
+    motif voyage aussi : un client doit pouvoir distinguer « reessaie plus tard »
+    (503) de « ne reessaie pas » (403).
+    """
+    return JSONResponse(
+        status_code=exc.statut,
+        media_type="application/problem+json",
+        content={
+            "type": f"https://gandal.internal/problemes/{exc.motif or 'refus'}",
+            "title": "Service de decision indisponible"
+                     if isinstance(exc, ServiceIndisponible) else "Refuse",
+            "status": exc.statut,
+            "detail": exc.explication or str(exc),
+            "motif": exc.motif,
+        },
+    )

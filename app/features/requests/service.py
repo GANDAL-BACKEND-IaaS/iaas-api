@@ -12,6 +12,7 @@ from pydantic import ValidationError
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from app.application.ports.decision import DecisionPort
 from app.application.ports.hypervisor import HypervisorPort, HypervisorUnavailable, VmRef, VmSpec
 from app.application.ports.iam import GlobalRole, IamPort
 from app.application.ports.notifications import Notification, NotificationsPort
@@ -23,6 +24,7 @@ from app.features.requests.schemas import (
     VMUpdateRequestIn,
 )
 from app.shared.enums import RequestKind, RequestStatus, ResourceType, VmState
+from app.shared.models.base import new_id
 from app.shared.models.packs import Pack
 from app.shared.models.projects import Project
 from app.shared.models.requests import ResourceRequest
@@ -154,11 +156,16 @@ async def submit_request(
     kind: RequestKind,
     payload: dict,
     target_resource_id: str | None,
+    # INJECTE, par mot-cle et avec un defaut : les appels positionnels
+    # existants — leurs tests compris — continuent de marcher a
+    # l identique, et « None » garde le comportement d avant.
+    decision: DecisionPort | None = None,
 ) -> ResourceRequest:
     """Enregistre une demande en attente apres controle des droits (R1, R2, R13)."""
     _require_project(db, project_id)
     normalized, target_type, view = _prepare(db, kind, payload, target_resource_id)
     await authorize(
+        decision=decision,
         iam=iam,
         db=db,
         user_id=author_id,
@@ -243,6 +250,219 @@ def _require_pending(row: ResourceRequest) -> None:
         raise AppError(ErrorCode.INVALID_STATE, "Seule une demande en attente peut etre traitee.")
 
 
+def _tailles(payload: dict) -> dict[str, int]:
+    """La taille demandee, quelle que soit la forme du payload normalise.
+
+    « _normalize_vm_create » rend soit `{"configuration": {...}}` (configuration
+    explicite), soit les champs A PLAT (resolus depuis un pack). Les deux sont
+    lues ici, parce qu une seule des deux formes donnerait un quota nul sur la
+    moitie des demandes — et un quota nul ne refuse rien, il compte faux.
+    """
+    source = payload.get("configuration") or payload
+    return {cle: int(source.get(cle, 0) or 0)
+            for cle in ("ram_gb", "vcpu", "vram_gb", "ssd_gb")}
+
+
+def _ressources_de_quota(payload: dict) -> dict[str, int]:
+    t = _tailles(payload)
+    r = {"vm_count": 1, "vcpu": t["vcpu"], "ram_gb": t["ram_gb"],
+         "disk_gb": t["ssd_gb"]}
+    if t["vram_gb"]:
+        # La VRAM se compte en Mio dans IAM : « 2 Gio » s ecrit 2048.
+        r["gpu_mem_mb"] = t["vram_gb"] * 1024
+    return {k: v for k, v in r.items() if v}
+
+
+async def creer_en_libre_service(
+    db: Session,
+    iam: IamPort,
+    *,
+    author_id: str,
+    project_id: str,
+    payload: dict,
+    hypervisor: HypervisorPort,
+    notifications: NotificationsPort,
+    decision: DecisionPort | None = None,
+) -> ResourceRequest:
+    """Crée une VM SANS acceptation par un administrateur (R1, R2, R13).
+
+    POURQUOI CE CHEMIN EXISTE, ET POURQUOI IL REMPLACE L AUTRE POUR LES VM.
+    Faire valider chaque VM par un administrateur avait un sens quand rien ne
+    savait dire si l auteur y avait droit. IAM le sait : l administrateur a
+    valide le COMPTE et pose les QUOTAS, et c est tout ce qu il a a decider.
+    Lui redemander son avis a chaque machine, c est lui faire relire un calcul
+    que le service de decision vient de faire — et c est aussi la file
+    d attente ou un etudiant perd deux jours pour une VM de 2 vCPU.
+
+    LE QUOTA EST LA SEULE AUTORITE ICI. Si IAM accorde, la VM se cree. S il
+    refuse, le motif remonte tel quel : « il vous reste 0 vCPU sur 4 », et non
+    « demande en attente ».
+
+    CE QUI PASSE ENCORE PAR UNE DEMANDE : tout ce qui depasse le quota ou le
+    catalogue des profils. Une taille hors profil, un quota a relever, un GPU
+    de plus — la demande reste le bon endroit pour une EXCEPTION. Elle n est
+    plus le chemin normal.
+
+    LA TRACE N EST PAS PERDUE. Une ligne de demande est quand meme ecrite, deja
+    acceptee, avec « libre-service » en note : l audit et l historique voient
+    exactement ce qu ils voyaient avant, et « GET /requests » continue de rendre
+    la liste complete de ce qui a ete cree.
+    """
+    _require_project(db, project_id)
+    normalized, target_type, view = _prepare(
+        db, RequestKind.VM_CREATE, payload, None)
+    # LA DECISION D ABORD, AVANT D ECRIRE QUOI QUE CE SOIT. Ecrire la ligne
+    # puis demander ferait rester une demande orpheline a chaque refus.
+    await authorize(
+        decision=decision,
+        iam=iam,
+        db=db,
+        user_id=author_id,
+        project_id=project_id,
+        required_right=_RIGHT_FOR_KIND[RequestKind.VM_CREATE],
+        resource=view,
+    )
+    row = ResourceRequest(
+        id=new_id(),
+        project_id=project_id,
+        author_id=author_id,
+        kind=RequestKind.VM_CREATE.value,
+        payload=normalized,
+        target_resource_type=target_type,
+        target_resource_id=None,
+        status=RequestStatus.PENDING.value,
+        created_at=utcnow(),
+        updated_at=utcnow(),
+    )
+    db.add(row)
+    db.flush()
+
+    handler = _HANDLERS.get(row.kind)
+    if handler is None:
+        raise AppError(
+            ErrorCode.INTERNAL_ERROR,
+            f"Aucun traitement technique n'est enregistre pour {row.kind}.",
+        )
+    context = RequestContext(db=db, request=row, hypervisor=hypervisor)
+    # EXACTEMENT LE MEME CHEMIN QUE L ACCEPTATION : decision au nom de
+    # l auteur, quota retenu, handler, confirmation APRES l hyperviseur.
+    await _executer(db, row, context, handler, row.id, decision=decision)
+
+    row.status = RequestStatus.ACCEPTED.value
+    row.admin_note = "libre-service"
+    row.decided_at = utcnow()
+    row.updated_at = utcnow()
+    record_audit(
+        db,
+        actor_id=author_id,
+        action="vm.created_self_service",
+        entity_type="request",
+        entity_id=row.id,
+    )
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+async def _executer(
+    db: Session,
+    row: ResourceRequest,
+    context: RequestContext,
+    handler: Handler,
+    request_id: str,
+    *,
+    decision: DecisionPort | None,
+) -> None:
+    """Décide, retient le quota, lance le handler, confirme. Dans cet ordre.
+
+    EXTRAIT DE « accept_request » LE 5 NOVEMBRE 2026, pour que le LIBRE-SERVICE
+    passe exactement par ici. Recopier ces cent lignes dans un second chemin
+    les aurait fait diverger — et le jour de la divergence, l un des deux
+    compterait faux sans que personne ne le voie.
+    """
+    # ─── LE QUOTA EST RETENU ICI, ET NULLE PART AILLEURS ────────────────────
+    #
+    # C est le moment ou la ressource vient a l existence. Le retenir au DEPOT de
+    # la demande le bloquerait pendant les jours ou elle attend un administrateur,
+    # et dix demandes en attente epuiseraient un quota sans qu aucune VM
+    # n existe. On decide tot (dans `submit_request`, par `authorize`) et on
+    # compte tard.
+    #
+    # LA DECISION EST REDEMANDEE, au nom de l AUTEUR : entre le depot et
+    # maintenant, son role a pu expirer, son projet etre archive, une politique
+    # changer. Accepter sur la foi d une decision de trois jours applique un
+    # droit perime.
+    if decision is not None and row.kind == RequestKind.VM_CREATE.value:
+        await decision.autoriser(
+            sujet=row.author_id, action="vm:create",
+            ressource={"type": "vm", "id": str(row.payload.get("name") or row.id),
+                       "projet": row.project_id},
+            contexte={"vcpu": _tailles(row.payload)["vcpu"],
+                      "ram_gb": _tailles(row.payload)["ram_gb"],
+                      "disk_gb": _tailles(row.payload)["ssd_gb"]})
+        async with decision.transaction(
+                sujet=row.author_id, projet=row.project_id,
+                ressources=_ressources_de_quota(row.payload)) as jeton:
+            try:
+                await handler(context)
+            except AppError:
+                db.rollback()
+                raise
+            except HypervisorUnavailable:
+                db.rollback()
+                raise upstream_unavailable("infrastructure") from None
+            except Exception:
+                db.rollback()
+                logger.exception("Echec du traitement de la demande %s", request_id)
+                raise upstream_unavailable("infrastructure") from None
+            # CONFIRMER APRES le traitement : confirmer d abord compterait une VM
+            # qu un echec de l hyperviseur laisserait inexistante. Et si le corps
+            # leve, la sortie du bloc LIBERE la reservation.
+            await decision.confirmer(
+                jeton, id_ressource=str(row.target_resource_id or row.id),
+                type_ressource="vm")
+    elif decision is not None and row.kind == RequestKind.VM_UPDATE.value:
+        await decision.autoriser(
+            sujet=row.author_id, action="vm:update",
+            ressource={"type": "vm", "id": str(row.target_resource_id),
+                       "projet": row.project_id},
+            contexte={"vcpu": _tailles(row.payload)["vcpu"],
+                      "ram_gb": _tailles(row.payload)["ram_gb"],
+                      "disk_gb": _tailles(row.payload)["ssd_gb"]})
+        try:
+            await handler(context)
+        except AppError:
+            db.rollback()
+            raise
+        except Exception:
+            db.rollback()
+            logger.exception("Echec du traitement de la demande %s", request_id)
+            raise upstream_unavailable("infrastructure") from None
+        t = _tailles(row.payload)
+        # `redimensionner` compte l ECART, pas la taille entiere : c est IAM qui
+        # soustrait, dans sa transaction.
+        await decision.redimensionner(
+            sujet=row.author_id, id_ressource=str(row.target_resource_id),
+            quantites={"vcpu": t["vcpu"], "ram_gb": t["ram_gb"],
+                       "disk_gb": t["ssd_gb"]})
+    else:
+        # AUCUN service de decision branche : exactement le chemin d avant la
+        # greffe, traitement d erreur compris.
+        try:
+            await handler(context)
+        except AppError:
+            db.rollback()
+            raise
+        except HypervisorUnavailable:
+            db.rollback()
+            raise upstream_unavailable("infrastructure") from None
+        except Exception:
+            db.rollback()
+            logger.exception("Echec du traitement de la demande %s", request_id)
+            raise upstream_unavailable("infrastructure") from None
+
+
+
 async def accept_request(
     db: Session,
     *,
@@ -252,6 +472,10 @@ async def accept_request(
     note: str | None,
     hypervisor: HypervisorPort,
     notifications: NotificationsPort,
+    # INJECTE, par mot-cle et avec un defaut : les appels positionnels
+    # existants — leurs tests compris — continuent de marcher a
+    # l identique, et « None » garde le comportement d avant.
+    decision: DecisionPort | None = None,
 ) -> ResourceRequest:
     """Accepte une demande sans la modifier, puis appelle le handler du kind (R3, F16)."""
     _require_admin(actor_role)
@@ -264,18 +488,9 @@ async def accept_request(
             f"Aucun traitement technique n'est enregistre pour {row.kind}.",
         )
     context = RequestContext(db=db, request=row, hypervisor=hypervisor)
-    try:
-        await handler(context)
-    except AppError:
-        db.rollback()
-        raise
-    except HypervisorUnavailable:
-        db.rollback()
-        raise upstream_unavailable("infrastructure") from None
-    except Exception:
-        db.rollback()
-        logger.exception("Echec du traitement de la demande %s", request_id)
-        raise upstream_unavailable("infrastructure") from None
+
+    await _executer(db, row, context, handler, request_id,
+                    decision=decision)
     row.status = RequestStatus.ACCEPTED.value
     row.admin_note = note
     row.decided_at = utcnow()

@@ -1,9 +1,22 @@
 """Cas nominaux et limites de la creation d'invitation (F13, R8)."""
 
+import pytest
+
+from app.core.dependencies import get_decision
+from app.infrastructure.iam.fake_decision import FakeDecisionClient
+from app.main import app
 from tests.support import login_header
 
 
-async def test_owner_invites_with_extra_right(client, iam):
+@pytest.fixture
+def decision():
+    fake = FakeDecisionClient(plan_par_defaut={"vm_count": 5})
+    app.dependency_overrides[get_decision] = lambda: fake
+    yield fake
+    app.dependency_overrides.pop(get_decision, None)
+
+
+async def test_owner_invites_with_extra_right(client, iam, decision):
     """Le proprietaire invite avec un droit a la carte."""
     headers = await login_header(iam)
     created = client.post("/api/v1/projects", headers=headers, json={"name": "Alpha"}).json()
@@ -18,6 +31,25 @@ async def test_owner_invites_with_extra_right(client, iam):
     assert response.json()["invitee_id"] == bob.user_id
     assert response.json()["invitee_email"] == "bob@x.cm"
     assert response.json()["additional_rights"] == ["vm.view"]
+    assert any(
+        name == "autoriser" and details["action"] == "projet:membre:invite"
+        for name, details in decision.journal
+    )
+
+
+async def test_iam_can_refuse_an_invitation(client, iam, decision):
+    headers = await login_header(iam)
+    created = client.post("/api/v1/projects", headers=headers, json={"name": "Alpha"}).json()
+    bob = iam.add_user("bob@x.cm", "pw")
+    decision.refuser.add("projet:membre:invite")
+
+    response = client.post(
+        f"/api/v1/projects/{created['id']}/invitations",
+        headers=headers,
+        json={"invitee_id": bob.user_id},
+    )
+
+    assert response.status_code == 403
 
 
 async def test_owner_invites_by_email(client, iam):

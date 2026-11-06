@@ -15,10 +15,12 @@ from __future__ import annotations
 
 import pytest
 
-from app.application.ports.decision import Refuse
+from app.application.ports.decision import Refuse, ServiceIndisponible
 from app.core.dependencies import get_decision
 from app.infrastructure.iam.fake_decision import FakeDecisionClient
 from app.main import app
+from app.shared.models.vms import Vm
+from tests.support import login_header, own_project
 
 PLAN = {"vm_count": 5, "vcpu": 16, "ram_gb": 32, "disk_gb": 500, "gpu_mem_mb": 8192}
 
@@ -183,3 +185,81 @@ def test_redimensionner_compte_l_ecart(decision):
         assert decision.consomme["prj"]["vcpu"] == 1
 
     anyio.run(essai)
+
+
+async def test_echec_confirmation_compense_la_vm_creee(client, db, iam, decision, hypervisor):
+    """Un quota non confirme ne doit pas laisser une VM orpheline."""
+    await own_project(db, iam)
+    headers = await login_header(iam)
+
+    confirmer = decision.confirmer
+
+    async def confirmer_applique_mais_indisponible(
+        jeton, *, id_ressource, type_ressource, correlation=""
+    ):
+        await confirmer(
+            jeton,
+            id_ressource=id_ressource,
+            type_ressource=type_ressource,
+            correlation=correlation,
+        )
+        raise ServiceIndisponible("IAM indisponible")
+
+    decision.confirmer = confirmer_applique_mais_indisponible
+    response = client.post(
+        "/api/v1/projects/p1/vms/direct",
+        headers=headers,
+        json={
+            "name": "poste-test",
+            "configuration": {"ram_gb": 2, "vcpu": 2, "vram_gb": 1, "ssd_gb": 20},
+        },
+    )
+
+    assert response.status_code == 503, response.text
+    assert hypervisor.vms == {}
+    assert db.query(Vm).count() == 0
+    assert decision.consomme.get("p1", {}).get("vm_count", 0) == 0
+
+
+async def test_refus_iam_au_redimensionnement_ne_modifie_pas_la_vm(
+    client, db, iam, decision, hypervisor
+):
+    """Le quota est valide avant l'hyperviseur; un refus laisse la VM intacte."""
+    await own_project(db, iam)
+    user_headers = await login_header(iam)
+    created = client.post(
+        "/api/v1/projects/p1/vms/direct",
+        headers=user_headers,
+        json={
+            "name": "poste-test",
+            "configuration": {"ram_gb": 2, "vcpu": 2, "vram_gb": 0, "ssd_gb": 20},
+        },
+    )
+    assert created.status_code == 201, created.text
+    vm_id = created.json()["target_resource_id"]
+
+    update = client.post(
+        f"/api/v1/projects/p1/vms/{vm_id}/update-requests",
+        headers=user_headers,
+        json={"configuration": {"ram_gb": 4, "vcpu": 4, "vram_gb": 0, "ssd_gb": 40}},
+    )
+    assert update.status_code == 202, update.text
+
+    async def refuser_redimensionnement(**kwargs):
+        raise Refuse("quota epuise", motif="quota", statut=409)
+
+    decision.redimensionner = refuser_redimensionnement
+    admin_headers = await login_header(iam, "root@x.cm")
+    response = client.post(
+        f"/api/v1/requests/{update.json()['id']}/accept",
+        headers=admin_headers,
+        json={},
+    )
+
+    assert response.status_code == 409, response.text
+    assert hypervisor.vms[vm_id].ram_gb == 2
+    assert hypervisor.vms[vm_id].vcpu == 2
+    assert hypervisor.vms[vm_id].ssd_gb == 20
+    vm = db.get(Vm, vm_id)
+    assert vm is not None
+    assert (vm.ram_gb, vm.vcpu, vm.ssd_gb) == (2, 2, 20)

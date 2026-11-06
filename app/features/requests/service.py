@@ -264,13 +264,53 @@ def _tailles(payload: dict) -> dict[str, int]:
 
 
 def _ressources_de_quota(payload: dict) -> dict[str, int]:
+    return {cle: quantite for cle, quantite in _quantites_de_quota(payload).items()
+            if quantite}
+
+
+def _quantites_de_quota(payload: dict) -> dict[str, int]:
     t = _tailles(payload)
-    r = {"vm_count": 1, "vcpu": t["vcpu"], "ram_gb": t["ram_gb"],
-         "disk_gb": t["ssd_gb"]}
-    if t["vram_gb"]:
-        # La VRAM se compte en Mio dans IAM : « 2 Gio » s ecrit 2048.
-        r["gpu_mem_mb"] = t["vram_gb"] * 1024
-    return {k: v for k, v in r.items() if v}
+    return {
+        "vm_count": 1,
+        "vcpu": t["vcpu"],
+        "ram_gb": t["ram_gb"],
+        "disk_gb": t["ssd_gb"],
+        # IAM exprime la VRAM en Mio; garder le zero permet aussi de la rendre
+        # explicitement lors d'un redimensionnement vers une VM sans GPU.
+        "gpu_mem_mb": t["vram_gb"] * 1024,
+    }
+
+
+def _quantites_vm(vm: Vm) -> dict[str, int]:
+    return {
+        "vm_count": 1,
+        "vcpu": vm.vcpu,
+        "ram_gb": vm.ram_gb,
+        "disk_gb": vm.ssd_gb,
+        "gpu_mem_mb": vm.vram_gb * 1024,
+    }
+
+
+async def _compenser_creation_vm(
+    context: RequestContext,
+    decision: DecisionPort,
+    *,
+    rendre_quota: bool,
+) -> None:
+    vm_id = context.request.target_resource_id
+    if vm_id is None:
+        return
+    try:
+        await context.hypervisor.delete_vm(VmRef(vm_id))
+        if rendre_quota:
+            await decision.rendre(sujet=context.request.author_id, id_ressource=vm_id)
+    except Exception as exc:
+        logger.exception(
+            "Impossible de compenser la creation de la VM %s pour la demande %s",
+            vm_id,
+            context.request.id,
+        )
+        raise upstream_unavailable("compensation de VM") from exc
 
 
 async def creer_en_libre_service(
@@ -406,21 +446,36 @@ async def _executer(
             try:
                 await handler(context)
             except AppError:
-                db.rollback()
+                try:
+                    await _compenser_creation_vm(context, decision, rendre_quota=False)
+                finally:
+                    db.rollback()
                 raise
             except HypervisorUnavailable:
-                db.rollback()
+                try:
+                    await _compenser_creation_vm(context, decision, rendre_quota=False)
+                finally:
+                    db.rollback()
                 raise upstream_unavailable("infrastructure") from None
-            except Exception:
-                db.rollback()
+            except Exception as exc:
+                try:
+                    await _compenser_creation_vm(context, decision, rendre_quota=False)
+                finally:
+                    db.rollback()
                 logger.exception("Echec du traitement de la demande %s", request_id)
-                raise upstream_unavailable("infrastructure") from None
+                raise upstream_unavailable("infrastructure") from exc
             # CONFIRMER APRES le traitement : confirmer d abord compterait une VM
             # qu un echec de l hyperviseur laisserait inexistante. Et si le corps
             # leve, la sortie du bloc LIBERE la reservation.
-            await decision.confirmer(
-                jeton, id_ressource=str(row.target_resource_id or row.id),
-                type_ressource="vm")
+            vm_id = str(row.target_resource_id or row.id)
+            try:
+                await decision.confirmer(jeton, id_ressource=vm_id, type_ressource="vm")
+            except Exception:
+                try:
+                    await _compenser_creation_vm(context, decision, rendre_quota=True)
+                finally:
+                    db.rollback()
+                raise
     elif decision is not None and row.kind == RequestKind.VM_UPDATE.value:
         await decision.autoriser(
             sujet=row.author_id, action="vm:update",
@@ -429,22 +484,46 @@ async def _executer(
             contexte={"vcpu": _tailles(row.payload)["vcpu"],
                       "ram_gb": _tailles(row.payload)["ram_gb"],
                       "disk_gb": _tailles(row.payload)["ssd_gb"]})
-        try:
-            await handler(context)
-        except AppError:
-            db.rollback()
-            raise
-        except Exception:
-            db.rollback()
-            logger.exception("Echec du traitement de la demande %s", request_id)
-            raise upstream_unavailable("infrastructure") from None
-        t = _tailles(row.payload)
-        # `redimensionner` compte l ECART, pas la taille entiere : c est IAM qui
-        # soustrait, dans sa transaction.
+        vm = db.get(Vm, row.target_resource_id)
+        if vm is None:
+            raise AppError(ErrorCode.NOT_FOUND, "VM introuvable.")
+        anciennes_quantites = _quantites_vm(vm)
+        anciennes_tailles = VmSpec(
+            vm.name, vm.ram_gb, vm.vcpu, vm.vram_gb, vm.ssd_gb
+        )
         await decision.redimensionner(
             sujet=row.author_id, id_ressource=str(row.target_resource_id),
-            quantites={"vcpu": t["vcpu"], "ram_gb": t["ram_gb"],
-                       "disk_gb": t["ssd_gb"]})
+            quantites=_quantites_de_quota(row.payload))
+        try:
+            await handler(context)
+        except Exception as operation_error:
+            db.rollback()
+            try:
+                await context.hypervisor.update_vm(
+                    VmRef(str(row.target_resource_id)), anciennes_tailles
+                )
+            except Exception as compensation_error:
+                logger.exception(
+                    "Impossible de restaurer la VM %s apres l'echec de sa modification",
+                    row.target_resource_id,
+                )
+                raise upstream_unavailable("compensation de VM") from compensation_error
+            try:
+                await decision.redimensionner(
+                    sujet=row.author_id,
+                    id_ressource=str(row.target_resource_id),
+                    quantites=anciennes_quantites,
+                )
+            except Exception as compensation_error:
+                logger.exception(
+                    "Impossible de restaurer le quota de la VM %s",
+                    row.target_resource_id,
+                )
+                raise upstream_unavailable("restauration du quota") from compensation_error
+            if isinstance(operation_error, AppError):
+                raise
+            logger.exception("Echec du traitement de la demande %s", request_id)
+            raise upstream_unavailable("infrastructure") from operation_error
     else:
         # AUCUN service de decision branche : exactement le chemin d avant la
         # greffe, traitement d erreur compris.
@@ -679,6 +758,8 @@ async def handle_vm_create(context: RequestContext) -> None:
         ref = await context.hypervisor.create_vm(spec)
     except HypervisorUnavailable:
         raise upstream_unavailable("Hyperviseur") from None
+    context.request.target_resource_type = ResourceType.VM.value
+    context.request.target_resource_id = ref.vm_id
     context.db.add(
         Vm(
             id=ref.vm_id,
@@ -693,8 +774,6 @@ async def handle_vm_create(context: RequestContext) -> None:
             state=VmState.STOPPED.value,
         )
     )
-    context.request.target_resource_type = ResourceType.VM.value
-    context.request.target_resource_id = ref.vm_id
 
 
 async def handle_vm_update(context: RequestContext) -> None:

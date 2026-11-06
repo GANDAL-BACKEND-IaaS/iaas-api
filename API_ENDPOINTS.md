@@ -345,6 +345,7 @@ Toutes les suppressions de projet, VM et réseau emploient `POST .../deletion` e
 | GET | `/api/v1/shares` | Lister ses partages (extension) |
 | GET | `/api/v1/shares/{share_id}` | Lire un partage (extension) |
 | POST | `/api/v1/projects/{project_id}/vms` | Demander la création d'une VM |
+| POST | `/api/v1/projects/{project_id}/vms/direct` | Créer une VM sans acceptation administrateur |
 | GET | `/api/v1/projects/{project_id}/vms` | Lister les VM visibles |
 | GET | `/api/v1/projects/{project_id}/vms/{vm_id}` | Lire une VM |
 | POST | `/api/v1/projects/{project_id}/vms/{vm_id}/update-requests` | Demander la modification d'une VM |
@@ -673,6 +674,14 @@ Les routes de VM incluent l'adresse IP `ip_address` dans toutes les réponses `V
 - Les valeurs de configuration doivent être positives ou nulles selon la ressource : `ram_gb >= 1`, `vcpu >= 1`, `vram_gb >= 0`, `ssd_gb >= 1`. En mode pack, les valeurs proviennent du pack au dépôt.
 - Réponse `201 Created` : `RequestOut` (`kind: "vm_create"`, `status: "pending"`, `payload` contenant le nom et le pack ou la configuration, cible nulle jusqu'à création).
 - Erreurs : `401`, `403`, `404` projet/pack, `422` si ni les deux modes ou les deux modes sont fournis.
+
+### `POST /api/v1/projects/{project_id}/vms/direct` — Créer une VM directement
+
+- Accès : propriétaire ou invité avec `vm.request_create`.
+- Corps : même schéma `VMCreateRequestIn` que la demande de création.
+- La décision IAM est prise au nom de l'utilisateur et le quota est réservé avant la création, puis confirmé après le succès de l'hyperviseur. Une demande acceptée est conservée dans l'historique avec `admin_note: "libre-service"`.
+- Réponse `201 Created` : `RequestOut` avec `kind: "vm_create"` et `status: "accepted"`.
+- Erreurs : `401`, `403`, `404` projet/pack, `409` quota épuisé, `503` si IAM ou l'infrastructure est indisponible.
 
 ### `GET /api/v1/projects/{project_id}/vms`
 

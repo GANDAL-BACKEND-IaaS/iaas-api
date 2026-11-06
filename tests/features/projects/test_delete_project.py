@@ -1,8 +1,23 @@
 """Cas nominaux et limites de la suppression de projet (F12, R23)."""
 
+import pytest
+
+from app.core.dependencies import get_decision
+from app.infrastructure.iam.fake_decision import FakeDecisionClient
+from app.main import app
 from app.shared.models.projects import Project
 from app.shared.models.vms import Vm
 from tests.support import add_vm, login_header
+
+PLAN = {"vm_count": 5, "vcpu": 16, "ram_gb": 32, "disk_gb": 500}
+
+
+@pytest.fixture
+def decision():
+    fake = FakeDecisionClient(plan_par_defaut=PLAN)
+    app.dependency_overrides[get_decision] = lambda: fake
+    yield fake
+    app.dependency_overrides.pop(get_decision, None)
 
 
 def _confirm(client, path, headers):
@@ -57,6 +72,30 @@ async def test_owner_deletes_project_cascade(client, db, iam):
     assert db.get(Vm, "vm-1") is None
     assert db.get(Network, "net-1") is None
     assert db.query(ResourceShare).count() == 0
+
+
+async def test_project_cascade_restitutes_quota_for_each_vm(client, db, iam, decision):
+    from tests.support import own_project
+
+    await own_project(db, iam, "p1")
+    headers = await login_header(iam)
+    created = client.post(
+        "/api/v1/projects/p1/vms/direct",
+        headers=headers,
+        json={
+            "name": "quota-vm",
+            "configuration": {"ram_gb": 2, "vcpu": 2, "vram_gb": 0, "ssd_gb": 20},
+        },
+    )
+    assert created.status_code == 201, created.text
+
+    response = _confirm(client, "/api/v1/projects/p1/deletion", headers)
+
+    assert response.status_code == 200, response.text
+    assert decision.consomme["p1"]["vm_count"] == 0
+    assert decision.consomme["p1"]["vcpu"] == 0
+    assert decision.consomme["p1"]["ram_gb"] == 0
+    assert decision.consomme["p1"]["disk_gb"] == 0
 
 
 async def test_guest_cannot_delete_project(client, iam):

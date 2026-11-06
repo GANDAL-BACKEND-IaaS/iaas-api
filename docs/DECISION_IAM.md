@@ -199,12 +199,20 @@ de l'auteur a pu expirer, son projet être archivé, une politique changer.
 Accepter sur la foi d'une décision de trois jours, c'est appliquer un droit
 périmé. Un test le tient.
 
-**La modification compte l'écart**, pas la taille entière : l'acceptation d'une
-demande `vm_update` appelle `redimensionner`, et c'est IAM qui soustrait.
+**Le redimensionnement est autorisé avant de toucher l'hyperviseur.** IAM reçoit
+les nouvelles quantités absolues et calcule l'écart. Si l'hyperviseur échoue, le
+backend restaure la configuration et les anciennes quantités; une restauration
+qui échoue est journalisée et renvoie une erreur explicite.
 
-**Un projet non vide ne se supprime pas** (`409`). Le supprimer en cascade
-rendrait le quota de ses VM sans passer par `rendre`, et IAM continuerait de les
-compter — un quota consommé par ce qui n'existe plus.
+**La suppression rend le quota après la destruction de la VM**, y compris quand
+elle est supprimée en cascade avec son projet. Si le rendu échoue, la transaction
+locale est annulée et l'erreur est renvoyée; la suppression de l'hyperviseur est
+rejouable pour permettre une nouvelle tentative.
+
+**La création est compensée si la confirmation du quota échoue.** Le backend
+supprime la VM créée, rend son quota si la confirmation a pu aboutir et renvoie
+l'erreur IAM. Si la compensation échoue, une erreur explicite est renvoyée et le
+journal identifie la VM à réconcilier.
 
 ## 9. Le mode `fake` a un plan par défaut
 

@@ -7,7 +7,7 @@ Les actions directes appellent les ports et ne sont jamais appliquees a moitie.
 from sqlalchemy import delete, or_, select
 from sqlalchemy.orm import Session
 
-from app.application.ports.decision import DecisionPort
+from app.application.ports.decision import DecisionPort, Refuse
 from app.application.ports.hypervisor import HypervisorPort, HypervisorUnavailable, VmRef
 from app.application.ports.iam import IamPort, Identity
 from app.application.ports.network import NetworkPort, NetworkUnavailable
@@ -330,6 +330,7 @@ async def delete_vm_infrastructure(
     *,
     actor_id: str,
     vm: Vm,
+    decision: DecisionPort | None = None,
 ) -> None:
     """Effets externes et suppression locale d'une VM. N'enregistre pas la transaction."""
     projects = set(_network_projects(db, vm.id))
@@ -343,6 +344,8 @@ async def delete_vm_infrastructure(
     for owner in projects:
         await network.detach_vm_from_project(VmRef(vm.id), owner)
     await hypervisor.delete_vm(VmRef(vm.id))
+    if decision is not None:
+        await decision.rendre(sujet=actor_id, id_ressource=vm.id)
     db.execute(delete(NetworkVm).where(NetworkVm.vm_id == vm.id))
     record_audit(
         db,
@@ -405,8 +408,12 @@ async def delete_vm(
             network,
             actor_id=identity.user_id,
             vm=vm,
+            decision=decision,
         )
     except AppError:
+        db.rollback()
+        raise
+    except Refuse:
         db.rollback()
         raise
     except (NetworkUnavailable, HypervisorUnavailable, KeyError):

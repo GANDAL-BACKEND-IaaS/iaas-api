@@ -138,6 +138,13 @@ class FakeDecisionClient(DecisionPort):
     async def rendre(self, *, sujet: str, id_ressource: str,
                      correlation: str = "") -> None:
         self.journal.append(("rendre", {"sujet": sujet, "id": id_ressource}))
+        ressources = self.tailles.pop(id_ressource, None)
+        projet = self.projet_de.pop(id_ressource, None)
+        if ressources is None or projet is None:
+            return
+        for cle, quantite in ressources.items():
+            self.consomme.setdefault(projet, {}).setdefault(cle, 0)
+            self.consomme[projet][cle] -= quantite
 
     # ─── commodités d essai ─────────────────────────────────────────────────
 

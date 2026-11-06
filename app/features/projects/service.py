@@ -11,6 +11,7 @@ from sqlalchemy import delete, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.application.ports.decision import DecisionPort, Refuse
 from app.application.ports.hypervisor import HypervisorPort, HypervisorUnavailable, VmRef
 from app.application.ports.iam import (
     AlreadyMember,
@@ -51,6 +52,7 @@ from app.shared.models.requests import ResourceRequest
 from app.shared.models.rights import RightModel
 from app.shared.models.shares import ResourceShare
 from app.shared.models.vms import Vm
+from app.shared.policies.access import authorize
 from app.shared.policies.rights import membership_rights
 from app.shared.time import utcnow
 
@@ -203,6 +205,7 @@ async def _delete_project_resources(
     *,
     actor_id: str,
     project: Project,
+    decision: DecisionPort | None = None,
 ) -> None:
     """Supprime les ressources et dependances locales. N'enregistre pas la transaction."""
     await revoke_received_by_project(
@@ -216,7 +219,12 @@ async def _delete_project_resources(
     vms = list(db.scalars(select(Vm).where(Vm.origin_project_id == project.id)))
     for vm in vms:
         await delete_vm_infrastructure(
-            db, hypervisor, network, actor_id=actor_id, vm=vm
+            db,
+            hypervisor,
+            network,
+            actor_id=actor_id,
+            vm=vm,
+            decision=decision,
         )
     db.execute(delete(ResourceRequest).where(ResourceRequest.project_id == project.id))
     db.execute(
@@ -239,6 +247,8 @@ async def delete_project(
     identity: Identity,
     project_id: str,
     confirmation_text: str | None,
+    *,
+    decision: DecisionPort | None = None,
 ) -> DeletionPreviewOut | DeletionOut:
     """F12 : protocole de suppression en deux temps, en cascade (R23)."""
     project = _project(db, project_id)
@@ -276,8 +286,12 @@ async def delete_project(
             network,
             actor_id=identity.user_id,
             project=project,
+            decision=decision,
         )
     except AppError:
+        db.rollback()
+        raise
+    except Refuse:
         db.rollback()
         raise
     except (
@@ -605,10 +619,18 @@ async def create_invitation(
     identity: Identity,
     project_id: str,
     body: InvitationCreateIn,
+    decision: DecisionPort | None = None,
 ) -> InvitationOut:
     """F13 : invite un utilisateur. Les droits d'un invite sont plafonnes aux siens (R8)."""
     project = _project(db, project_id)
-    await _require_invite_right(iam, identity.user_id, project_id)
+    await authorize(
+        decision=decision,
+        iam=iam,
+        db=db,
+        user_id=identity.user_id,
+        project_id=project_id,
+        required_right="project.invite",
+    )
     invitee = await _resolve_invitee(iam, body)
     if invitee.user_id == identity.user_id:
         raise AppError(ErrorCode.CONFLICT, "On ne peut pas s'inviter soi-meme.")

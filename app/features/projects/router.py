@@ -6,12 +6,14 @@ Les suppressions suivent le protocole commun en deux temps (section 1.5).
 from fastapi import APIRouter, Body, Depends, Query, Response, status
 from sqlalchemy.orm import Session
 
+from app.application.ports.decision import DecisionPort
 from app.application.ports.hypervisor import HypervisorPort
 from app.application.ports.iam import IamPort, Identity
 from app.application.ports.network import NetworkPort
 from app.application.ports.notifications import NotificationsPort
 from app.core.database import get_db
 from app.core.dependencies import (
+    get_decision,
     get_hypervisor,
     get_iam,
     get_network,
@@ -145,6 +147,7 @@ async def delete_project(
     hypervisor: HypervisorPort = Depends(get_hypervisor),
     network: NetworkPort = Depends(get_network),
     db: Session = Depends(get_db),
+    decision: DecisionPort | None = Depends(get_decision),
     body: DeletionIn = Body(default_factory=DeletionIn),
 ):
     """F12 : apercu puis suppression effective du projet et de ses ressources."""
@@ -156,6 +159,7 @@ async def delete_project(
         identity,
         project_id,
         body.confirmation_text,
+        decision=decision,
     )
 
 
@@ -236,10 +240,11 @@ async def create_invitation(
     iam: IamPort = Depends(get_iam),
     notifications: NotificationsPort = Depends(get_notifications),
     db: Session = Depends(get_db),
+    decision: DecisionPort | None = Depends(get_decision),
 ) -> InvitationOut:
     """F13 : invite un utilisateur. Les droits d'un invite sont plafonnes aux siens (R8)."""
     return await service.create_invitation(
-        db, iam, notifications, identity, project_id, body
+        db, iam, notifications, identity, project_id, body, decision=decision
     )
 
 

@@ -8,11 +8,6 @@ valeur aurait conclu que tout allait bien.
 """
 from __future__ import annotations
 
-import pytest
-
-from app.core.dependencies import get_decision
-from app.main import app
-
 
 def test_off_est_rapporte_tel_quel(client):
     r = client.get("/ready")

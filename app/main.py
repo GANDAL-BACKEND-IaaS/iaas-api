@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from app.api.v1.router import router as v1_router
 from app.application.ports.decision import Refuse, ServiceIndisponible
 from app.core.database import SessionLocal, get_db
-from app.core.dependencies import get_iam
+from app.core.dependencies import get_decision, get_iam
 from app.core.errors import (
     ErrorCode,
     error_responses,
@@ -125,7 +125,35 @@ def ready(db: Session = Depends(get_db)) -> ReadinessOut:
         db.execute(text("SELECT 1"))
     except SQLAlchemyError:
         raise upstream_unavailable("base de donnees") from None
-    return ReadinessOut(status="ready", decision=get_settings().decision_backend)
+    # ─── « decision » DIT LA CAPACITE, PAS LE REGLAGE ───────────────────────
+    #
+    # ELLE DISAIT LE REGLAGE, ET ELLE MENTAIT. Le 6 novembre 2026, ce point
+    # d API a annonce « decision: gandal » sur une machine ou « gandal_garde »
+    # n etait meme pas installe : l adaptateur ne pouvait pas etre construit,
+    # et toute decision aurait leve ModuleNotFoundError au premier appel.
+    # Une supervision qui lit cette valeur aurait conclu que tout allait bien.
+    #
+    # On CONSTRUIT donc l adaptateur. C est bon marche — imports, lecture de la
+    # cle, verification de son mode — et ca attrape exactement ce qui est
+    # arrive. On ne fait PAS d appel reseau ici : « /ready » est interroge en
+    # boucle par les supervisions, et une decision par sonde chargerait IAM
+    # pour rien.
+    reglage = get_settings().decision_backend
+    if reglage == "off":
+        decision = "off"
+    else:
+        try:
+            decision = reglage if get_decision() is not None else "off"
+        except Exception as e:                                  # noqa: BLE001
+            # ON NE LEVE PAS 503 : la base repond, les routes servent, et
+            # « off » est un etat de service degrade qui se lit. Mais on le DIT,
+            # et on le journalise une fois par sonde — c est ce qui remonte
+            # dans une alerte.
+            logging.getLogger("app").error(
+                "DECISION_BACKEND=%s mais l adaptateur est inconstructible : "
+                "%s. Aucune decision IAM ne sera prise.", reglage, e)
+            decision = f"{reglage} (INDISPONIBLE)"
+    return ReadinessOut(status="ready", decision=decision)
 
 
 app.include_router(v1_router)
